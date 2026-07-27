@@ -1,5 +1,6 @@
 #import "app_darwin.h"
 #import "menu.h"
+#import "../../branding/branding.h"
 #import "../../updater/updater_darwin.h"
 #import <AppKit/AppKit.h>
 #import <Cocoa/Cocoa.h>
@@ -411,9 +412,13 @@ static NSBundle *OllamaResourceBundle(void) {
     }
 
     NSString *cwdPath = [[NSFileManager defaultManager] currentDirectoryPath];
+    NSString *bundleName =
+        [NSString stringWithFormat:@"%@.app", OML_BUNDLE_NAME];
     NSArray<NSString *> *bundlePaths = @[
-        [cwdPath stringByAppendingPathComponent:@"darwin/Ollama.app"],
-        [cwdPath stringByAppendingPathComponent:@"app/darwin/Ollama.app"],
+        [cwdPath stringByAppendingPathComponent:
+                     [@"darwin" stringByAppendingPathComponent:bundleName]],
+        [cwdPath stringByAppendingPathComponent:
+                     [@"app/darwin" stringByAppendingPathComponent:bundleName]],
     ];
     for (NSString *bundlePath in bundlePaths) {
         if ([[NSFileManager defaultManager] fileExistsAtPath:bundlePath]) {
@@ -435,7 +440,7 @@ static NSImage *ollamaApplicationIcon(void) {
 
 - (void)application:(NSApplication *)application openURLs:(NSArray<NSURL *> *)urls {
     for (NSURL *url in urls) {
-        if ([url.scheme isEqualToString:@"ollama"]) {
+        if ([url.scheme isEqualToString:OML_URL_SCHEME]) {
             NSString *path = url.path;
 
             if (path && ([path isEqualToString:@"/connect"] || [url.host isEqualToString:@"connect"])) {
@@ -461,6 +466,8 @@ static NSImage *ollamaApplicationIcon(void) {
     // if we're in development mode, set the app icon
     NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
     if (![bundlePath hasSuffix:@".app"]) {
+        // OllamaResourceBundle() looks under darwin/<OML_BUNDLE_NAME>.app, so
+        // this picks up the fork's icon without a path literal here.
         NSImage *customIcon = ollamaApplicationIcon();
         if (customIcon != nil) {
             [NSApp setApplicationIconImage:customIcon];
@@ -505,7 +512,7 @@ static NSImage *ollamaApplicationIcon(void) {
     [self applyShowAppsInMenu:shouldShowAppsInMenu()];
 
     NSMenuItem *appsMenuItem =
-        [[NSMenuItem alloc] initWithTitle:@"Open Ollama"
+        [[NSMenuItem alloc] initWithTitle:@"Open " OML_NAME
                                    action:@selector(appsUI)
                             keyEquivalent:@""];
     [appsMenuItem setTarget:self];
@@ -534,7 +541,7 @@ static NSImage *ollamaApplicationIcon(void) {
 
     [menu addItem:[NSMenuItem separatorItem]];
 
-    [menu addItemWithTitle:@"Quit Ollama"
+    [menu addItemWithTitle:@"Quit " OML_NAME
                     action:@selector(requestQuit)
              keyEquivalent:@"q"];
 
@@ -550,7 +557,7 @@ static NSImage *ollamaApplicationIcon(void) {
     [self showIcon];
 
     // Application menu
-    NSString *appName = @"Ollama";
+    NSString *appName = OML_NAME;
 
     NSMenu *mainMenu = [[NSMenu alloc] init];
     NSMenuItem *appMenuItem = [[NSMenuItem alloc] initWithTitle:appName
@@ -1507,7 +1514,7 @@ didCompleteWithError:(NSError *)error {
         self.statusItem.button.image = statusImage;
     } else {
         self.statusItem.button.image = nil;
-        self.statusItem.button.title = @"Ollama";
+        self.statusItem.button.title = OML_NAME;
     }
 }
 
@@ -1594,10 +1601,10 @@ didCompleteWithError:(NSError *)error {
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 - (void)registerSelfAsLoginItem:(BOOL)firstTimeRun {
     appLogInfo(@"using v13+ SMAppService for login registration");
-    // Maps to the file Ollama.app/Contents/Library/LaunchAgents/com.ollama.ollama.plist
-    SMAppService* service = [SMAppService agentServiceWithPlistName:@"com.ollama.ollama.plist"];
+    // Maps to the file <BundleName>.app/Contents/Library/LaunchAgents/<BundleID>.plist
+    SMAppService* service = [SMAppService agentServiceWithPlistName:OML_BUNDLE_ID @".plist"];
     if (!service) {
-        appLogInfo(@"SMAppService failed to find service for com.ollama.ollama.plist");
+        appLogInfo(@"SMAppService failed to find service for " OML_BUNDLE_ID @".plist");
         return;
     }
     SMAppServiceStatus status = [service status];
@@ -1646,7 +1653,7 @@ didCompleteWithError:(NSError *)error {
         if (LSSharedFileListItemResolve((LSSharedFileListItemRef)item, 0,
                                         &itemURL, NULL) == noErr) {
             CFStringRef loginPath = CFURLCopyFileSystemPath(itemURL, kCFURLPOSIXPathStyle);
-            // Compare the prefix to match against "keep existing" flow, e.g. // "/Applications/Ollama.app" vs "/Applications/Ollama 2.app"
+            // Compare the prefix to match against "keep existing" flow, e.g. // "/Applications/OhMyLlama.app" vs "/Applications/OhMyLlama 2.app"
             if (loginPath && [(NSString *)loginPath hasPrefix:bundlePrefix]) {
                 appLogInfo([NSString stringWithFormat:@"removing login item %@", loginPath]);
                 LSSharedFileListItemRemove(loginItems,
@@ -1661,7 +1668,7 @@ didCompleteWithError:(NSError *)error {
             CFStringRef displayName = LSSharedFileListItemCopyDisplayName((LSSharedFileListItemRef)item);
             if (displayName) {
                 NSString *name = (__bridge NSString *)displayName;
-                if ([name hasPrefix:@"Ollama"]) {
+                if ([name hasPrefix:OML_BUNDLE_NAME]) {
                     LSSharedFileListItemRemove(loginItems, (LSSharedFileListItemRef)item);
                     appLogInfo([NSString stringWithFormat:@"removing dangling login item %@", displayName]);
                 }
@@ -1875,14 +1882,39 @@ void run(bool so, bool sh) {
     StopUI();
 }
 
+// isOllamaApplication reports whether app is another instance of *this* build,
+// i.e. one the sync barrier may terminate.
+//
+// Unlike upstream this deliberately does not match stock Ollama's identifiers. A
+// stock install is a separate app the user may want to keep running, so
+// warnAboutStockOllama only logs about it - it shares the same server port, so
+// whichever started first wins.
 static BOOL isOllamaApplication(NSRunningApplication *app) {
     NSString *bundleId = app.bundleIdentifier;
     if (bundleId == nil || bundleId.length == 0) {
         return NO;
     }
-    return [bundleId isEqualToString:[[NSBundle mainBundle] bundleIdentifier]] ||
-        [bundleId isEqualToString:@"ai.ollama.ollama"] ||
-        [bundleId isEqualToString:@"com.electron.ollama"];
+    return [bundleId isEqualToString:[[NSBundle mainBundle] bundleIdentifier]];
+}
+
+// warnAboutStockOllama logs once per launch if stock Ollama is running, since
+// otherOllamaProcesses is polled by the sync barrier.
+static void warnAboutStockOllama(NSRunningApplication *app) {
+    NSString *bundleId = app.bundleIdentifier;
+    if (![bundleId isEqualToString:@"ai.ollama.ollama"] &&
+        ![bundleId isEqualToString:@"com.electron.ollama"]) {
+        return;
+    }
+    static BOOL warned = NO;
+    if (warned) {
+        return;
+    }
+    warned = YES;
+    appLogInfo([NSString
+        stringWithFormat:@"stock Ollama is running (%@, pid %d) - it shares the "
+                         @"same server port, quit it if " OML_NAME
+                         @" fails to start its server",
+                         bundleId, app.processIdentifier]);
 }
 
 bool otherOllamaProcesses(AppProcessIdentity **processes, size_t *count) {
@@ -1895,6 +1927,8 @@ bool otherOllamaProcesses(AppProcessIdentity **processes, size_t *count) {
 
     size_t resultCount = 0;
     for (NSRunningApplication *app in apps) {
+        warnAboutStockOllama(app);
+
         pid_t pid = app.processIdentifier;
         if (!isOllamaApplication(app) || pid == myPid) {
             continue;
@@ -2012,8 +2046,8 @@ bool moveToApplications(const char *src) {
 }
 
 AuthorizationRef getSymlinkAuthorization() {
-    return getAuthorization(@"Ollama is trying to install its command line "
-                            @"interface (CLI) tool.",
+    return getAuthorization(OML_NAME @" is trying to install its command line "
+                                      "interface (CLI) tool.",
                             @"symlink");
 }
 
@@ -2163,8 +2197,8 @@ enum AppMove askToMoveToApplications() {
 
     NSAlert *alert = [[NSAlert alloc] init];
     [alert setMessageText:@"Move to Applications?"];
-    [alert setInformativeText:
-               @"Ollama works best when run from the Applications directory."];
+    [alert setInformativeText:OML_NAME
+               @" works best when run from the Applications directory."];
     [alert addButtonWithTitle:@"Move to Applications"];
     [alert addButtonWithTitle:@"Don't move"];
 
@@ -2213,7 +2247,7 @@ void launchApp(const char *appPath) {
 }
 
 int installSymlink(const char *cliPath) {
-    NSString *linkPath = @"/usr/local/bin/ollama";
+    NSString *linkPath = @"/usr/local/bin/" OML_CLI_NAME;
     NSString *dirPath = @"/usr/local/bin";
     NSError *error = nil;
 
@@ -2262,7 +2296,7 @@ int installSymlink(const char *cliPath) {
     // Create the symlink using the same authorization
     const char *toolPath = "/bin/ln";
     const char *args[] = {"-s", "-F", [resPath UTF8String],
-                          "/usr/local/bin/ollama", NULL};
+                          [linkPath UTF8String], NULL};
     FILE *pipe = NULL;
 
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
