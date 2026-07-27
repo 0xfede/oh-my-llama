@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ollama/ollama/app/auth"
+	"github.com/ollama/ollama/app/branding"
 	"github.com/ollama/ollama/app/logrotate"
 	"github.com/ollama/ollama/app/server"
 	"github.com/ollama/ollama/app/store"
@@ -63,7 +64,7 @@ func main() {
 	if len(os.Args) > 1 {
 		for _, arg := range os.Args {
 			// Handle URL scheme requests (Windows)
-			if strings.HasPrefix(arg, "ollama://") {
+			if strings.HasPrefix(arg, branding.URLScheme+"://") {
 				urlSchemeRequest = arg
 				slog.Info("received URL scheme request", "url", arg)
 				continue
