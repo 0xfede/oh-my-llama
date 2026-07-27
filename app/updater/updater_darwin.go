@@ -20,9 +20,11 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/ollama/ollama/app/branding"
 )
 
-const updateArchiveRoot = "Ollama.app"
+const updateArchiveRoot = branding.BundleName + ".app"
 
 type bundleEntryScope int
 
@@ -33,7 +35,7 @@ const (
 
 var (
 	appBackupDir   string
-	SystemWidePath = "/Applications/Ollama.app"
+	SystemWidePath = "/Applications/" + updateArchiveRoot
 )
 
 var BundlePath = func() string {
@@ -63,7 +65,7 @@ var BundlePath = func() string {
 
 func init() {
 	VerifyDownload = verifyDownload
-	Installer = "Ollama-darwin.zip"
+	Installer = branding.BundleName + "-darwin.zip"
 	home, err := os.UserHomeDir()
 	if err != nil {
 		panic(err)
@@ -81,7 +83,7 @@ func init() {
 
 	// TODO handle failure modes here, and developer mode better...
 
-	// Executable = Ollama.app/Contents/MacOS/Ollama
+	// Executable = <BundleName>.app/Contents/MacOS/<BundleName>
 
 	UpgradeLogFile = filepath.Join(home, ".ollama", "logs", "upgrade.log")
 
@@ -90,7 +92,7 @@ func init() {
 		slog.Warn("unable to determine user cache dir, falling back to tmpdir", "error", err)
 		cacheDir = os.TempDir()
 	}
-	appDataDir := filepath.Join(cacheDir, "ollama")
+	appDataDir := filepath.Join(cacheDir, branding.CacheDirName)
 	UpgradeMarkerFile = filepath.Join(appDataDir, "upgraded")
 	appBackupDir = filepath.Join(appDataDir, "backup")
 	UpdateStageDir = filepath.Join(appDataDir, "updates")
@@ -110,7 +112,7 @@ func DoUpgrade(interactive bool) error {
 	// time to drain connections and stop allowing new connections while we perform the
 	// actual upgrade to reduce the overall time to complete
 	contentsName := filepath.Join(BundlePath, "Contents")
-	appBackup := filepath.Join(appBackupDir, "Ollama.app")
+	appBackup := filepath.Join(appBackupDir, updateArchiveRoot)
 	contentsOldName := filepath.Join(appBackup, "Contents")
 
 	// Verify old doesn't exist yet
@@ -166,7 +168,7 @@ func DoUpgrade(interactive bool) error {
 		}
 	}()
 
-	// Bundle contents Ollama.app/Contents/...
+	// Bundle contents <BundleName>.app/Contents/...
 	links := []*zip.File{}
 	for _, f := range r.File {
 		s := strings.SplitN(f.Name, "/", 2)
@@ -205,7 +207,7 @@ func DoUpgrade(interactive bool) error {
 		}
 	}
 	for _, f := range links {
-		s := strings.SplitN(f.Name, "/", 2) // Strip off Ollama.app/
+		s := strings.SplitN(f.Name, "/", 2) // Strip off <BundleName>.app/
 		if len(s) < 2 || s[1] == "" {
 			slog.Debug("skipping link", "file", f.Name)
 			continue
@@ -338,7 +340,7 @@ func verifyDownload() error {
 		}
 	}
 
-	if err := verifyExtractedBundle(filepath.Join(dir, "Ollama.app")); err != nil {
+	if err := verifyExtractedBundle(filepath.Join(dir, updateArchiveRoot)); err != nil {
 		return fmt.Errorf("signature verification failed: %s", err)
 	}
 	return nil
@@ -462,7 +464,7 @@ func alreadyMoved() string {
 	// Respect users intent if they chose "keep" vs. "replace" when dragging to Applications
 	installedAppPaths, err := filepath.Glob(filepath.Join(
 		strings.TrimSuffix(SystemWidePath, filepath.Ext(SystemWidePath))+"*"+filepath.Ext(SystemWidePath),
-		"Contents", "MacOS", "Ollama"))
+		"Contents", "MacOS", branding.BundleName))
 	if err != nil {
 		slog.Warn("failed to lookup installed app paths", "error", err)
 		return ""
