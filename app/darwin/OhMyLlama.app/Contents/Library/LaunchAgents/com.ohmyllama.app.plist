@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.ollama.ollama</string>
+    <string>com.ohmyllama.app</string>
     <key>BundleProgram</key>
 	<string>Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel</string>
     <key>ProgramArguments</key>
