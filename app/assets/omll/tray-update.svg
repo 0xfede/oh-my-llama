@@ -1,0 +1,26 @@
+<!-- Oh My Llama menu bar glyph, "update available" variant. Like the stock app's
+     treatment, the mark keeps most of its size and the download arrow is tucked
+     into the bottom-right corner rather than stacked below it - stacking would
+     shrink the llama to an unreadable smudge in a 16px box. The glyph is also
+     allowed to be wider than the plain one (upstream's is 28x32 against 24x32),
+     since the status bar slot grows to fit.
+     Same head-and-shoulder crop as tray.svg - see the note there.
+     Template image: opaque black on transparent. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100">
+  <g transform="translate(42 44) scale(1.16) translate(-56 -38)">
+    <g fill="#000000">
+      <path d="M41 27 C36 19 36 7 41 2 C47 8 48 20 47 27 Z"/>
+      <path d="M58 27 C56 18 59 6 65 2 C69 10 66 21 63 27 Z"/>
+      <path fill-rule="evenodd"
+            d="M26 74 C26 58 28 48 34 39 C39 30 46 24 55 23
+               L75 23 C82 23 86 28 86 35 C86 41 81 45 75 45
+               L62 45 C57 47 55 52 54 60 C53 66 54 70 55 74 Z
+               M48.6 32 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z"/>
+    </g>
+  </g>
+  <!-- download arrow, bottom-right -->
+  <g fill="#000000">
+    <rect x="76" y="58" width="10" height="18" rx="1.5"/>
+    <path d="M67 72 h28 L81 96 z"/>
+  </g>
+</svg>

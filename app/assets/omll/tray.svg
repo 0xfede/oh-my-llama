@@ -1,0 +1,33 @@
+<!-- Oh My Llama menu bar (tray) glyph, 2x. Rendered as a macOS template image:
+     opaque black on transparent, so AppKit tints it for light/dark menu bars.
+
+     This is a head-and-upper-neck crop of the mark in llama.svg, not the whole
+     silhouette. The full silhouette is tall and narrow, so fitting it into the
+     square status bar slot leaves it noticeably smaller and lighter than the
+     neighbouring menu bar icons. Cropping to the head makes the mark roughly
+     square, so it can fill the slot. Upstream splits it the same way: full llama
+     in the app icon, head in the tray.
+
+     The eye is a hole punched out with fill-rule="evenodd" rather than a white
+     circle - a template image carries only alpha, so a white fill would be
+     tinted the same as the body and vanish.
+
+     Cutting at the neck alone leaves a floating head that reads as a donkey, so
+     the crop keeps the shoulder: the neck widens out to the bottom-left corner,
+     which is what makes it read as a llama bust. Bounding box is x 26..86,
+     y 2..74, centre (56, 38) - hence the recentring transform. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100">
+  <g transform="translate(50 50) scale(1.34) translate(-56 -38)">
+    <g fill="#000000">
+      <!-- ears -->
+      <path d="M41 27 C36 19 36 7 41 2 C47 8 48 20 47 27 Z"/>
+      <path d="M58 27 C56 18 59 6 65 2 C69 10 66 21 63 27 Z"/>
+      <!-- head, muzzle and shoulder, with the eye knocked out -->
+      <path fill-rule="evenodd"
+            d="M26 74 C26 58 28 48 34 39 C39 30 46 24 55 23
+               L75 23 C82 23 86 28 86 35 C86 41 81 45 75 45
+               L62 45 C57 47 55 52 54 60 C53 66 54 70 55 74 Z
+               M48.6 32 a3.4 3.4 0 1 0 6.8 0 a3.4 3.4 0 1 0 -6.8 0 Z"/>
+    </g>
+  </g>
+</svg>
