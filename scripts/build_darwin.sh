@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Note:
-#  While testing, if you double-click on the Ollama.app
+#  While testing, if you double-click on the app bundle
 #  some state is left on MacOS and subsequent attempts
 #  to build again will fail with:
 #
@@ -11,8 +11,24 @@
 #
 #    VOL_NAME="$(date)" ./scripts/build_darwin.sh
 #
-VOL_NAME=${VOL_NAME:-"Ollama"}
+
+# Product identity. These must stay in sync with app/branding/branding.go, which
+# is what the app and the updater compile against.
+BUNDLE_NAME="OhMyLlama"
+BUNDLE_ID="com.ohmyllama.app"
+
+VOL_NAME=${VOL_NAME:-"Oh My Llama"}
 export VERSION=${VERSION:-$(git describe --tags --first-parent --abbrev=7 --long --dirty --always | sed -e "s/^v//g")}
+
+# Linker overrides baked into the app binary. UPDATE_FEED_URL is optional and only
+# needed to point a test build at a different feed; the default lives in
+# app/branding. Both targets are plain string vars initialized from constants,
+# which is what -X requires.
+GO_LDFLAGS_X="-X=github.com/ollama/ollama/app/version.Version=${VERSION}"
+if [ -n "$UPDATE_FEED_URL" ]; then
+    GO_LDFLAGS_X="$GO_LDFLAGS_X -X=github.com/ollama/ollama/app/updater.UpdateCheckURLBase=${UPDATE_FEED_URL}"
+fi
+
 export CGO_CFLAGS="-O3 -mmacosx-version-min=14.0"
 export CGO_CXXFLAGS="-O3 -mmacosx-version-min=14.0"
 export CGO_LDFLAGS="-mmacosx-version-min=14.0"
@@ -135,20 +151,33 @@ _merge_darwin_payload() {
     done
 }
 
+# _lipo_arches DEST RELATIVE_PATH combines the per-arch copies of one binary into
+# DEST. Unlike upstream this tolerates a single-arch build (./build_darwin.sh -a
+# arm64), which is what CI uses - a thin arm64 binary is a valid Mach-O, and
+# building the x86_64 half roughly doubles the build time for machines we do not
+# target.
+_lipo_arches() {
+    DEST=$1
+    RELPATH=$2
+    INPUTS=""
+    VERIFY=""
+    for ARCH in $ARCHS; do
+        F="dist/darwin-$ARCH/$RELPATH"
+        [ -f "$F" ] || { echo "missing $F" >&2; exit 1; }
+        INPUTS="$INPUTS $F"
+        [ "$ARCH" = "amd64" ] && VERIFY="$VERIFY x86_64" || VERIFY="$VERIFY $ARCH"
+    done
+    lipo -create -output "$DEST" $INPUTS
+    chmod +x "$DEST"
+    lipo "$DEST" -verify_arch $VERIFY
+}
+
 _prepare_darwin_runtime() {
-    status "Creating universal binary..."
+    status "Combining binaries for: $ARCHS"
     mkdir -p dist/darwin
-    lipo -create -output dist/darwin/ollama dist/darwin-amd64/ollama dist/darwin-arm64/ollama
-    chmod +x dist/darwin/ollama
-    lipo dist/darwin/ollama -verify_arch x86_64 arm64
-
-    lipo -create -output dist/darwin/llama-server dist/darwin-amd64/lib/ollama/llama-server dist/darwin-arm64/lib/ollama/llama-server
-    chmod +x dist/darwin/llama-server
-    lipo dist/darwin/llama-server -verify_arch x86_64 arm64
-
-    lipo -create -output dist/darwin/llama-quantize dist/darwin-amd64/lib/ollama/llama-quantize dist/darwin-arm64/lib/ollama/llama-quantize
-    chmod +x dist/darwin/llama-quantize
-    lipo dist/darwin/llama-quantize -verify_arch x86_64 arm64
+    _lipo_arches dist/darwin/ollama ollama
+    _lipo_arches dist/darwin/llama-server lib/ollama/llama-server
+    _lipo_arches dist/darwin/llama-quantize lib/ollama/llama-quantize
 
     _merge_darwin_payload
 }
@@ -166,14 +195,33 @@ _package_darwin_runtime() {
     _create_darwin_runtime_tarball
 }
 
+# _codesign signs one file, using a real Developer ID when APPLE_IDENTITY is set
+# and falling back to an ad-hoc signature otherwise.
+#
+# The fallback matters: the updater's macOS download check runs
+# SecStaticCodeCheckValidityWithErrors with no Team ID pin, so an ad-hoc
+# signature passes it - but an *unsigned* bundle does not. Upstream simply skips
+# signing without an identity, which would make every self-update fail
+# verification. Ad-hoc signatures carry no timestamp and cannot use the hardened
+# runtime, hence the separate flags.
+_codesign() {
+    IDENTIFIER=$1
+    shift
+    if [ -n "$APPLE_IDENTITY" ]; then
+        codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier "$IDENTIFIER" --options=runtime "$@"
+    else
+        codesign -f -s - --identifier "$IDENTIFIER" "$@"
+    fi
+}
+
 _sign_darwin() {
     _prepare_darwin_runtime
-    if [ -n "$APPLE_IDENTITY" ]; then
-        for F in dist/darwin/ollama dist/darwin/llama-server dist/darwin/llama-quantize dist/darwin/lib/ollama/* dist/darwin/lib/ollama/mlx_metal_v*/*; do
-            [ -f "$F" ] && [ ! -L "$F" ] || continue
-            codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier ai.ollama.ollama --options=runtime "$F"
-        done
+    for F in dist/darwin/ollama dist/darwin/llama-server dist/darwin/llama-quantize dist/darwin/lib/ollama/* dist/darwin/lib/ollama/mlx_metal_v*/*; do
+        [ -f "$F" ] && [ ! -L "$F" ] || continue
+        _codesign "$BUNDLE_ID" "$F"
+    done
 
+    if [ -n "$APPLE_IDENTITY" ]; then
         # create a temporary zip for notarization
         TEMP=$(mktemp -u).zip
         ditto -c -k --keepParent dist/darwin/ollama "$TEMP"
@@ -203,90 +251,103 @@ _build_macapp() {
     npm run build
     cd ../../..
 
-    # Build the Ollama.app bundle
-    rm -rf dist/Ollama.app
-    cp -a ./app/darwin/Ollama.app dist/Ollama.app
+    APP=dist/$BUNDLE_NAME.app
+
+    # Build the app bundle
+    rm -rf "$APP"
+    cp -a "./app/darwin/$BUNDLE_NAME.app" "$APP"
 
     # update the modified date of the app bundle to now
-    touch dist/Ollama.app
+    touch "$APP"
 
     go clean -cache
-    GOARCH=amd64 CGO_ENABLED=1 GOOS=darwin go build -o dist/darwin-app-amd64 -ldflags="-s -w -X=github.com/ollama/ollama/app/version.Version=${VERSION}" ./app/cmd/app
-    GOARCH=arm64 CGO_ENABLED=1 GOOS=darwin go build -o dist/darwin-app-arm64 -ldflags="-s -w -X=github.com/ollama/ollama/app/version.Version=${VERSION}" ./app/cmd/app
-    mkdir -p dist/Ollama.app/Contents/MacOS
-    lipo -create -output dist/Ollama.app/Contents/MacOS/Ollama dist/darwin-app-amd64 dist/darwin-app-arm64
-    rm -f dist/darwin-app-amd64 dist/darwin-app-arm64
+    APP_BINS=""
+    for ARCH in $ARCHS; do
+        GOARCH=$ARCH CGO_ENABLED=1 GOOS=darwin go build -o "dist/darwin-app-$ARCH" -ldflags="-s -w $GO_LDFLAGS_X" ./app/cmd/app
+        APP_BINS="$APP_BINS dist/darwin-app-$ARCH"
+    done
+    mkdir -p "$APP/Contents/MacOS"
+    lipo -create -output "$APP/Contents/MacOS/$BUNDLE_NAME" $APP_BINS
+    rm -f $APP_BINS
 
     # Create a mock Squirrel.framework bundle
-    mkdir -p dist/Ollama.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/
-    cp -a dist/Ollama.app/Contents/MacOS/Ollama dist/Ollama.app/Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel
-    ln -s ../Squirrel dist/Ollama.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt
-    cp -a ./app/cmd/squirrel/Info.plist dist/Ollama.app/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/Info.plist
-    ln -s A dist/Ollama.app/Contents/Frameworks/Squirrel.framework/Versions/Current
-    ln -s Versions/Current/Resources dist/Ollama.app/Contents/Frameworks/Squirrel.framework/Resources
-    ln -s Versions/Current/Squirrel dist/Ollama.app/Contents/Frameworks/Squirrel.framework/Squirrel
+    mkdir -p "$APP/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/"
+    cp -a "$APP/Contents/MacOS/$BUNDLE_NAME" "$APP/Contents/Frameworks/Squirrel.framework/Versions/A/Squirrel"
+    ln -s ../Squirrel "$APP/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/ShipIt"
+    cp -a ./app/cmd/squirrel/Info.plist "$APP/Contents/Frameworks/Squirrel.framework/Versions/A/Resources/Info.plist"
+    ln -s A "$APP/Contents/Frameworks/Squirrel.framework/Versions/Current"
+    ln -s Versions/Current/Resources "$APP/Contents/Frameworks/Squirrel.framework/Resources"
+    ln -s Versions/Current/Squirrel "$APP/Contents/Frameworks/Squirrel.framework/Squirrel"
 
     # Update the version in the Info.plist
-    plutil -replace CFBundleShortVersionString -string "$VERSION" dist/Ollama.app/Contents/Info.plist
-    plutil -replace CFBundleVersion -string "$VERSION" dist/Ollama.app/Contents/Info.plist
+    plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+    plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
 
     # Setup the ollama binaries
-    mkdir -p dist/Ollama.app/Contents/Resources
+    mkdir -p "$APP/Contents/Resources"
     [ -d dist/darwin/lib/ollama ] || _merge_darwin_payload
-    cp -a dist/darwin/ollama dist/Ollama.app/Contents/Resources/ollama
-    cp dist/darwin/llama-server dist/Ollama.app/Contents/Resources/
-    cp dist/darwin/llama-quantize dist/Ollama.app/Contents/Resources/
+    cp -a dist/darwin/ollama "$APP/Contents/Resources/ollama"
+    cp dist/darwin/llama-server "$APP/Contents/Resources/"
+    cp dist/darwin/llama-quantize "$APP/Contents/Resources/"
     if [ -d dist/darwin/lib/ollama ]; then
-        cp -a dist/darwin/lib/ollama/. dist/Ollama.app/Contents/Resources/
+        cp -a dist/darwin/lib/ollama/. "$APP/Contents/Resources/"
     fi
-    chmod a+x dist/Ollama.app/Contents/Resources/ollama
+    chmod a+x "$APP/Contents/Resources/ollama"
 
-    # Sign
+    # Sign. Unlike upstream this runs even without an APPLE_IDENTITY, falling back
+    # to an ad-hoc signature - see _codesign.
+    status "Signing $APP"
+    _codesign "$BUNDLE_ID" "$APP/Contents/Resources/ollama"
+    _codesign "$BUNDLE_ID" "$APP/Contents/Resources/llama-server"
+    _codesign "$BUNDLE_ID" "$APP/Contents/Resources/llama-quantize"
+    for lib in "$APP"/Contents/Resources/*.so "$APP"/Contents/Resources/*.dylib "$APP"/Contents/Resources/*.metallib "$APP"/Contents/Resources/mlx_metal_v*/*.dylib "$APP"/Contents/Resources/mlx_metal_v*/*.metallib "$APP"/Contents/Resources/mlx_metal_v*/*.so; do
+        [ -f "$lib" ] || continue
+        _codesign "$BUNDLE_ID" "$lib"
+    done
+    _codesign "$BUNDLE_ID" --deep "$APP"
+
+    # The updater rejects a bundle whose signature does not validate, so fail the
+    # build here rather than shipping something that can never self-update.
+    codesign --verify --deep --strict "$APP"
+
+    rm -f "dist/$BUNDLE_NAME-darwin.zip"
+    ditto -c -k --norsrc --keepParent "$APP" "dist/$BUNDLE_NAME-darwin.zip"
+    (cd "$APP/Contents/Resources/"; tar -cf - ollama llama-server llama-quantize *.so *.dylib *.metallib mlx_metal_v*/ 2>/dev/null) | gzip -9vc > dist/ollama-darwin.tgz
+
+    # Notarize and Staple. Only possible with a real Developer ID; an ad-hoc build
+    # stays unnotarized, which means Gatekeeper quarantines the *first* download on
+    # each Mac (right-click -> Open once). In-place self-updates unzip without a
+    # quarantine flag, so they are unaffected.
     if [ -n "$APPLE_IDENTITY" ]; then
-        codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier ai.ollama.ollama --options=runtime dist/Ollama.app/Contents/Resources/ollama
-        codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier ai.ollama.ollama --options=runtime dist/Ollama.app/Contents/Resources/llama-server
-        codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier ai.ollama.ollama --options=runtime dist/Ollama.app/Contents/Resources/llama-quantize
-        for lib in dist/Ollama.app/Contents/Resources/*.so dist/Ollama.app/Contents/Resources/*.dylib dist/Ollama.app/Contents/Resources/*.metallib dist/Ollama.app/Contents/Resources/mlx_metal_v*/*.dylib dist/Ollama.app/Contents/Resources/mlx_metal_v*/*.metallib dist/Ollama.app/Contents/Resources/mlx_metal_v*/*.so; do
-            [ -f "$lib" ] || continue
-            codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier ai.ollama.ollama --options=runtime "$lib"
-        done
-        codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier com.electron.ollama --deep --options=runtime dist/Ollama.app
-    fi
-
-    rm -f dist/Ollama-darwin.zip
-    ditto -c -k --norsrc --keepParent dist/Ollama.app dist/Ollama-darwin.zip
-    (cd dist/Ollama.app/Contents/Resources/; tar -cf - ollama llama-server llama-quantize *.so *.dylib *.metallib mlx_metal_v*/ 2>/dev/null) | gzip -9vc > dist/ollama-darwin.tgz
-
-    # Notarize and Staple
-    if [ -n "$APPLE_IDENTITY" ]; then
-        $(xcrun -f notarytool) submit dist/Ollama-darwin.zip --wait --timeout 20m --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
-        rm -f dist/Ollama-darwin.zip
-        $(xcrun -f stapler) staple dist/Ollama.app
-        ditto -c -k --norsrc --keepParent dist/Ollama.app dist/Ollama-darwin.zip
-
-        rm -f dist/Ollama.dmg
-
-        (cd dist && ../scripts/create-dmg.sh \
-            --volname "${VOL_NAME}" \
-            --volicon ../app/darwin/Ollama.app/Contents/Resources/icon.icns \
-            --background ../app/assets/background.png \
-            --window-pos 200 120 \
-            --window-size 800 400 \
-            --icon-size 128 \
-            --icon "Ollama.app" 200 190 \
-            --hide-extension "Ollama.app" \
-            --app-drop-link 600 190 \
-            --text-size 12 \
-            "Ollama.dmg" \
-            "Ollama.app" \
-        ; )
-        rm -f dist/rw*.dmg
-
-        codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier ai.ollama.ollama --options=runtime dist/Ollama.dmg
-        $(xcrun -f notarytool) submit dist/Ollama.dmg --wait --timeout 20m --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
-        $(xcrun -f stapler) staple dist/Ollama.dmg
+        $(xcrun -f notarytool) submit "dist/$BUNDLE_NAME-darwin.zip" --wait --timeout 20m --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
+        rm -f "dist/$BUNDLE_NAME-darwin.zip"
+        $(xcrun -f stapler) staple "$APP"
+        ditto -c -k --norsrc --keepParent "$APP" "dist/$BUNDLE_NAME-darwin.zip"
     else
-        echo "WARNING: Code signing disabled, this bundle will not work for upgrade testing"
+        echo "WARNING: ad-hoc signed (no APPLE_IDENTITY). Self-update works; the first install on each Mac needs right-click -> Open."
+    fi
+
+    rm -f "dist/$BUNDLE_NAME.dmg"
+    (cd dist && ../scripts/create-dmg.sh \
+        --volname "${VOL_NAME}" \
+        --volicon "../app/darwin/$BUNDLE_NAME.app/Contents/Resources/icon.icns" \
+        --background ../app/assets/background.png \
+        --window-pos 200 120 \
+        --window-size 800 400 \
+        --icon-size 128 \
+        --icon "$BUNDLE_NAME.app" 200 190 \
+        --hide-extension "$BUNDLE_NAME.app" \
+        --app-drop-link 600 190 \
+        --text-size 12 \
+        "$BUNDLE_NAME.dmg" \
+        "$BUNDLE_NAME.app" \
+    ; )
+    rm -f dist/rw*.dmg
+
+    _codesign "$BUNDLE_ID" "dist/$BUNDLE_NAME.dmg"
+    if [ -n "$APPLE_IDENTITY" ]; then
+        $(xcrun -f notarytool) submit "dist/$BUNDLE_NAME.dmg" --wait --timeout 20m --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
+        $(xcrun -f stapler) staple "dist/$BUNDLE_NAME.dmg"
     fi
 }
 
