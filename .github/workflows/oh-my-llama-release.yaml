@@ -1,0 +1,128 @@
+# Build and publish an Oh My Llama release.
+#
+# This is the fork's own pipeline; upstream's release.yaml is left untouched so it
+# keeps rebasing cleanly. It builds the macOS app arm64-only, ad-hoc signs it (see
+# scripts/build_darwin.sh), and publishes a GitHub Release plus the update.json
+# feed that installed copies poll.
+#
+# Triggered by oh-my-llama-sync.yaml pushing an "omll-v*" tag, or by hand.
+name: oh-my-llama release
+
+on:
+  push:
+    tags:
+      - 'omll-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build, e.g. 0.32.4-omll.1 (defaults to the tag)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    env:
+      # No Apple Developer ID: scripts/build_darwin.sh falls back to an ad-hoc
+      # signature, which is enough for the updater's validity check.
+      APPLE_IDENTITY: ''
+      CGO_CFLAGS: '-mmacosx-version-min=14.0 -O3'
+      CGO_CXXFLAGS: '-mmacosx-version-min=14.0 -O3'
+      CGO_LDFLAGS: '-mmacosx-version-min=14.0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # refs/tags/omll-v0.32.4-omll.1 -> 0.32.4-omll.1
+            VERSION="${GITHUB_REF_NAME#omll-v}"
+          fi
+          echo "VERSION=$VERSION" | tee -a "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            LLAMA_CPP_VERSION
+            MLX_VERSION
+            MLX_C_VERSION
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: ./scripts/build_darwin.sh -a arm64
+
+      - name: Verify the bundle is signed and stamped
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          APP=dist/OhMyLlama.app
+          # The updater refuses a bundle that fails this check, so a build that
+          # gets past here can always self-update.
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION"
+          test "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" = "com.ohmyllama.app"
+          ls -l dist/
+
+      - name: Write the update feed
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          # The client derives the version from the URL's second-to-last path
+          # segment, so the tag directory must be exactly the version.
+          cat > dist/update.json <<EOF
+          {
+            "version": "$VERSION",
+            "url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${VERSION}/OhMyLlama-darwin.zip"
+          }
+          EOF
+          cat dist/update.json
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          (cd dist && shasum -a 256 OhMyLlama-darwin.zip OhMyLlama.dmg > sha256sum.txt)
+          cat dist/sha256sum.txt
+
+      # The release tag is the bare version, because the updater parses the
+      # version out of the download URL's path. The trigger tag (omll-v*) is
+      # deliberately different so pushing it does not collide with this.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          NOTES=$(cat <<'EOF'
+          Unofficial rebuild of Ollama. Not affiliated with or endorsed by Ollama.
+
+          **First install on a Mac:** the build is ad-hoc signed rather than
+          notarized, so Gatekeeper blocks the initial download. Right-click the app
+          and choose Open once, or run:
+
+              xattr -dr com.apple.quarantine /Applications/OhMyLlama.app
+
+          Subsequent updates install themselves and need no such step.
+          EOF
+          )
+          gh release create "$VERSION" \
+            --title "Oh My Llama $VERSION" \
+            --notes "$NOTES" \
+            dist/OhMyLlama-darwin.zip \
+            dist/OhMyLlama.dmg \
+            dist/update.json \
+            dist/sha256sum.txt
