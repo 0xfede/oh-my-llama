@@ -1493,7 +1493,8 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) error {
 
 	if old.ContextLength != settings.ContextLength ||
 		old.Models != settings.Models ||
-		old.Expose != settings.Expose {
+		old.Expose != settings.Expose ||
+		old.KeepAlive != settings.KeepAlive {
 		s.Restart()
 	}
 

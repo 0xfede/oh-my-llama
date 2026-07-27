@@ -172,6 +172,12 @@ type Settings struct {
 
 	// AutoUpdateEnabled indicates if automatic updates should be downloaded
 	AutoUpdateEnabled bool
+
+	// KeepAlive specifies how long models stay loaded in memory (using OLLAMA_KEEP_ALIVE).
+	// Accepts a Go duration ("60m", "1h", "30s"), a bare integer in seconds, "-1" for
+	// indefinitely, or "0" to unload immediately. Empty means use the server default (5m).
+	// If OLLAMA_KEEP_ALIVE is already set in the environment it takes precedence over this.
+	KeepAlive string
 }
 
 type Store struct {
