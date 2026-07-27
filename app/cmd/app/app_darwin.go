@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ollama/ollama/app/branding"
 	"github.com/ollama/ollama/app/updater"
 	"github.com/ollama/ollama/app/version"
 )
@@ -38,7 +39,7 @@ var ollamaPath = func() string {
 var (
 	isApp           = updater.BundlePath != ""
 	appLogPath      = filepath.Join(os.Getenv("HOME"), ".ollama", "logs", "app.log")
-	launchAgentPath = filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.ollama.ollama.plist")
+	launchAgentPath = filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", branding.BundleID+".plist")
 )
 
 // TODO(jmorganca): pre-create the window and pass
@@ -140,7 +141,7 @@ func installSymlink() {
 	defer C.free(unsafe.Pointer(cliPath))
 
 	// Check the users path first
-	cmd, _ := exec.LookPath("ollama")
+	cmd, _ := exec.LookPath(branding.CLIName)
 	if cmd != "" {
 		resolved, err := os.Readlink(cmd)
 		if err == nil {
@@ -152,7 +153,7 @@ func installSymlink() {
 			resolved = cmd
 		}
 		if resolved == ollamaPath {
-			slog.Info("ollama already in users PATH", "cli", cmd)
+			slog.Info("cli already in users PATH", "cli", cmd)
 			return
 		}
 	}
@@ -230,15 +231,15 @@ func styleWindow(ptr unsafe.Pointer) {
 }
 
 func runInBackground() {
-	cmd := exec.Command(filepath.Join(updater.BundlePath, "Contents", "MacOS", "Ollama"), "hidden")
+	cmd := exec.Command(filepath.Join(updater.BundlePath, "Contents", "MacOS", branding.BundleName), "hidden")
 	if cmd != nil {
 		err := cmd.Run()
 		if err != nil {
-			slog.Error("failed to run Ollama", "bundlePath", updater.BundlePath, "error", err)
+			slog.Error("failed to run app", "bundlePath", updater.BundlePath, "error", err)
 			os.Exit(1)
 		}
 	} else {
-		slog.Error("failed to start Ollama in background", "bundlePath", updater.BundlePath)
+		slog.Error("failed to start app in background", "bundlePath", updater.BundlePath)
 		os.Exit(1)
 	}
 }
