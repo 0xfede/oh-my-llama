@@ -1,4 +1,5 @@
 #import "updater_darwin.h"
+#import "../branding/branding.h"
 #import <AppKit/AppKit.h>
 #import <Cocoa/Cocoa.h>
 #import <CoreServices/CoreServices.h>
@@ -15,7 +16,7 @@ void appLogDebug(NSString *msg) {
     goLogDebug([msg UTF8String]);
 }
 
-NSString *SystemWidePath = @"/Applications/Ollama.app";
+NSString *SystemWidePath = @"/Applications/" OML_BUNDLE_NAME @".app";
 
 // TODO - how to detect if the user has admin access?
 // Possible APIs to explore:
@@ -91,8 +92,8 @@ AuthorizationRef getAuthorization(NSString *authorizationPrompt,
 
 AuthorizationRef getAppInstallAuthorization() {
     return getAuthorization(
-        @"Ollama needs additional permission to move or update itself as a "
-         "system-wide Application",
+        OML_NAME @" needs additional permission to move or update itself as a "
+                  "system-wide Application",
         @"systemApplication");
 }
 
