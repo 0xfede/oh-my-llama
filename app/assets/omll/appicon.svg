@@ -1,0 +1,16 @@
+<!-- Oh My Llama app icon: the mark on a rounded-square tile, sized to the
+     macOS "squircle" proportions (824/1024 content area, 185px corner radius).
+     Geometry mirrors llama.svg. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#ffffff"/>
+  <g transform="translate(215 205) scale(5.94)">
+    <g fill="#111111">
+      <path d="M41 27 C36 19 36 7 41 2 C47 8 48 20 47 27 Z"/>
+      <path d="M58 27 C56 18 59 6 65 2 C69 10 66 21 63 27 Z"/>
+      <path d="M25 97 C25 68 27 50 34 39 C39 30 46 24 55 23
+               L75 23 C82 23 86 28 86 35 C86 41 81 45 75 45
+               L62 45 C57 47 55 52 54 60 C53 72 55 85 57 97 Z"/>
+    </g>
+    <circle cx="52" cy="32" r="3.4" fill="#ffffff"/>
+  </g>
+</svg>
