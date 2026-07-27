@@ -1,0 +1,18 @@
+<!-- Oh My Llama menu bar glyph, simplified for 16px (non-retina) rendering.
+     At 16px one pixel is ~6 units of this grid, so the 2x drawing's slim ears
+     land on a single pixel column and turn to grey mud. This variant widens and
+     shortens them and drops the eye (a 1px hole reads as noise rather than an
+     eye). Same head-and-shoulder crop as tray.svg - see the note there for why
+     the tray glyph is a crop and not the whole silhouette.
+     Template image: opaque black on transparent. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100">
+  <g transform="translate(50 50) scale(1.36) translate(-56 -38)" fill="#000000">
+    <!-- ears: wider and blunter than the 2x drawing -->
+    <path d="M38 28 C34 20 35 8 41 3 C48 9 48 21 47 28 Z"/>
+    <path d="M58 28 C57 19 60 7 66 3 C71 11 67 21 65 28 Z"/>
+    <!-- head, muzzle and shoulder -->
+    <path d="M26 74 C26 58 28 48 34 39 C39 30 46 24 55 23
+             L75 23 C82 23 86 28 86 35 C86 41 81 45 75 45
+             L62 45 C57 47 55 52 54 60 C53 66 54 70 55 74 Z"/>
+  </g>
+</svg>
