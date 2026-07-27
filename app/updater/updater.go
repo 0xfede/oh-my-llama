@@ -24,13 +24,16 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/semver"
+
+	"github.com/ollama/ollama/app/branding"
 	"github.com/ollama/ollama/app/store"
 	"github.com/ollama/ollama/app/version"
 	"github.com/ollama/ollama/auth"
 )
 
 var (
-	UpdateCheckURLBase      = "https://ollama.com/api/update"
+	UpdateCheckURLBase      = branding.UpdateFeedURL
 	UpdateDownloaded        = false
 	UpdateCheckInterval     = 60 * 60 * time.Second
 	UpdateCheckInitialDelay = 3 * time.Second // 30 * time.Second
@@ -130,8 +133,35 @@ func (u *Updater) checkForUpdate(ctx context.Context) (bool, UpdateResponse) {
 	// Extract the version string from the URL in the github release artifact path
 	updateResp.UpdateVersion = path.Base(path.Dir(updateResp.UpdateURL))
 
+	// Our feed is a static JSON file on the latest GitHub release, so it always
+	// answers 200 with the newest version - it cannot answer 204 the way the
+	// official endpoint does for an already-current client. Compare here instead.
+	if !isNewer(updateResp.UpdateVersion, currentVersion) {
+		slog.Debug("already running the latest version", "current", currentVersion, "available", updateResp.UpdateVersion)
+		return false, UpdateResponse{}
+	}
+
 	slog.Info("New update available at " + updateResp.UpdateURL)
 	return true, updateResp
+}
+
+// isNewer reports whether the offered version is strictly newer than current.
+//
+// Versions are semver with a "-omll.N" build suffix (e.g. "0.32.4-omll.2"),
+// which semver.Compare orders correctly as a prerelease: within one upstream
+// release, omll.2 > omll.1, and any 0.32.5 beats every 0.32.4-omll.N. That
+// prerelease ordering also means a plain upstream "0.32.4" sorts *above*
+// "0.32.4-omll.1", which is fine - we never serve unsuffixed builds.
+//
+// Anything unparseable (including the "0.0.0" of an un-stamped dev build) is
+// treated as not-newer so a broken feed can never trigger a downgrade.
+func isNewer(offered, current string) bool {
+	o, c := "v"+strings.TrimPrefix(offered, "v"), "v"+strings.TrimPrefix(current, "v")
+	if !semver.IsValid(o) || !semver.IsValid(c) {
+		slog.Debug("unable to compare versions", "offered", offered, "current", current)
+		return false
+	}
+	return semver.Compare(o, c) > 0
 }
 
 func (u *Updater) DownloadNewRelease(ctx context.Context, updateResp UpdateResponse) error {
