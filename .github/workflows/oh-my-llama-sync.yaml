@@ -1,0 +1,142 @@
+# Watch upstream ollama/ollama for new releases and rebase this fork onto them.
+#
+# The fork is a rebase-onto-tags soft fork: the fork branch is always
+# <upstream tag> + our patch commits. When upstream ships vX.Y.Z this job rebases
+# those commits onto the new tag and pushes an omll-v* tag, which triggers
+# oh-my-llama-release.yaml.
+#
+# If a patch stops applying, the job stops and opens an issue rather than pushing
+# a half-merged tree.
+name: oh-my-llama sync
+
+on:
+  schedule:
+    # Every 6 hours. Upstream releases every week or two, so this is ample.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_tag:
+        description: 'Upstream tag to rebase onto, e.g. v0.32.5 (defaults to latest)'
+        required: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the rebase needs the recorded upstream base commit.
+          fetch-depth: 0
+
+      - name: Find the newest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.upstream_tag }}" ]; then
+            LATEST="${{ inputs.upstream_tag }}"
+          else
+            LATEST=$(gh release view --repo ollama/ollama --json tagName --jq .tagName)
+          fi
+          CURRENT=$(tr -d '[:space:]' < UPSTREAM_VERSION)
+          echo "latest=$LATEST"   | tee -a "$GITHUB_OUTPUT"
+          echo "current=$CURRENT" | tee -a "$GITHUB_OUTPUT"
+          if [ "$LATEST" = "$CURRENT" ]; then
+            echo "changed=false" | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" | tee -a "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebase our patches onto the new tag
+        id: rebase
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          OLD: ${{ steps.upstream.outputs.current }}
+          NEW: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          git config user.name  "oh-my-llama bot"
+          git config user.email "noreply@github.com"
+
+          git remote add upstream https://github.com/ollama/ollama.git
+          git fetch --no-tags upstream "refs/tags/$OLD:refs/tags/$OLD" "refs/tags/$NEW:refs/tags/$NEW"
+
+          # Our patch commits are everything on this branch that is not in the old
+          # upstream tag. --onto replays exactly those onto the new tag.
+          echo "Replaying $(git rev-list --count "$OLD"..HEAD) commit(s) onto $NEW"
+          git log --oneline "$OLD"..HEAD
+
+          if ! git rebase --onto "$NEW" "$OLD"; then
+            git rebase --abort || true
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # Record the new base so the next run rebases from here.
+          echo "$NEW" > UPSTREAM_VERSION
+          git commit -am "oh-my-llama: track upstream $NEW"
+
+      - name: Build the fork version string
+        id: version
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.upstream.outputs.latest }}
+        run: |
+          set -euo pipefail
+          # <upstream without v>-omll.<n>, n restarting at 1 for each upstream
+          # release. semver treats "-omll.N" as a prerelease, which orders both
+          # dimensions correctly - see isNewer in app/updater.
+          BASE="${NEW#v}"
+          N=1
+          while gh release view "$BASE-omll.$N" >/dev/null 2>&1; do
+            N=$((N + 1))
+          done
+          echo "version=$BASE-omll.$N" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Push the rebased branch and release tag
+        if: steps.upstream.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The rebase rewrote history, which is expected for this branch.
+          git push --force-with-lease origin "HEAD:${GITHUB_REF_NAME}"
+          # Pushing omll-v* is what triggers oh-my-llama-release.yaml.
+          git tag "omll-v$VERSION"
+          git push origin "omll-v$VERSION"
+
+      - name: Open an issue if the rebase failed
+        if: failure() && steps.rebase.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW: ${{ steps.upstream.outputs.latest }}
+          OLD: ${{ steps.upstream.outputs.current }}
+        run: |
+          set -euo pipefail
+          gh issue create \
+            --title "Rebase onto upstream $NEW needs manual help" \
+            --body "$(cat <<EOF
+          Automatic rebase of the fork patches from \`$OLD\` onto \`$NEW\` hit a conflict, so nothing was pushed.
+
+          To fix locally:
+
+          \`\`\`sh
+          git fetch upstream --tags
+          git rebase --onto $NEW $OLD
+          # resolve, then:
+          echo $NEW > UPSTREAM_VERSION
+          git commit -am "oh-my-llama: track upstream $NEW"
+          git push --force-with-lease
+          \`\`\`
+
+          Then re-run \`oh-my-llama sync\`, or tag the release by hand.
+
+          [Failed run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          EOF
+          )"
