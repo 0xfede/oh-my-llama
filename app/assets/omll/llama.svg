@@ -1,0 +1,23 @@
+<!-- The Oh My Llama mark: a llama head and neck in profile, drawn as a solid
+     silhouette on a 100x100 grid with a knocked-out eye.
+
+     Profile is deliberate - a front-facing camelid head reads as a donkey or a
+     pig, whereas the long neck and the upward-tilted blunt muzzle of the
+     profile read unmistakably as a llama. Solid rather than outlined so the
+     shape survives the 16px menu bar.
+
+     appicon.svg, tray.svg and tray-update.svg inline this geometry; keep them
+     in sync if you change it. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100">
+  <g fill="#111111">
+    <!-- ears: tall, narrow, slightly splayed -->
+    <path d="M41 27 C36 19 36 7 41 2 C47 8 48 20 47 27 Z"/>
+    <path d="M58 27 C56 18 59 6 65 2 C69 10 66 21 63 27 Z"/>
+    <!-- neck sweeping up into the head, then out to the muzzle -->
+    <path d="M25 97 C25 68 27 50 34 39 C39 30 46 24 55 23
+             L75 23 C82 23 86 28 86 35 C86 41 81 45 75 45
+             L62 45 C57 47 55 52 54 60 C53 72 55 85 57 97 Z"/>
+  </g>
+  <!-- eye, knocked out of the silhouette -->
+  <circle cx="52" cy="32" r="3.4" fill="#ffffff"/>
+</svg>
