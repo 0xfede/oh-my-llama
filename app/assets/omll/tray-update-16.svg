@@ -1,0 +1,20 @@
+<!-- Oh My Llama menu bar glyph for 16px, "update available" variant: the
+     simplified 1x mark with the download arrow tucked into the bottom-right
+     corner. Same head-and-shoulder crop as tray.svg - see the note there.
+     Template image: opaque black on transparent. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 100 100">
+  <g transform="translate(40 42) scale(1.12) translate(-56 -38)" fill="#000000">
+    <path d="M38 28 C34 20 35 8 41 3 C48 9 48 21 47 28 Z"/>
+    <path d="M58 28 C57 19 60 7 66 3 C71 11 67 21 65 28 Z"/>
+    <path d="M26 74 C26 58 28 48 34 39 C39 30 46 24 55 23
+             L75 23 C82 23 86 28 86 35 C86 41 81 45 75 45
+             L62 45 C57 47 55 52 54 60 C53 66 54 70 55 74 Z"/>
+  </g>
+  <!-- download arrow. At 16px one pixel is 6.25 units, so the arrow is snapped to
+       that grid: a 1px stem and a 5px-wide head. Anything thicker and the stem
+       matches the head's shoulders in width, which reads as a plus sign. -->
+  <g fill="#000000">
+    <rect x="81.25" y="50" width="6.25" height="25"/>
+    <path d="M68.75 75 h31.25 L84.4 100 z"/>
+  </g>
+</svg>
