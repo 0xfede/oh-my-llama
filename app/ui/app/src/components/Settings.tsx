@@ -14,6 +14,7 @@ import {
   CloudIcon,
   XMarkIcon,
   CogIcon,
+  ClockIcon,
   ArrowLeftIcon,
   ArrowDownTrayIcon,
 } from "@heroicons/react/20/solid";
@@ -192,8 +193,11 @@ export default function Settings() {
           [field]: value,
         });
 
-        // If context length is being changed, show restart message
-        if (field === "ContextLength" && value !== settings.ContextLength) {
+        // If a setting that restarts the server is changed, show restart message
+        if (
+          (field === "ContextLength" && value !== settings.ContextLength) ||
+          (field === "KeepAlive" && value !== settings.KeepAlive)
+        ) {
           setRestartMessage(true);
           // Hide restart message after 3 seconds
           setTimeout(() => setRestartMessage(false), 3000);
@@ -215,6 +219,7 @@ export default function Settings() {
         Tools: false,
         ContextLength: 0,
         AutoUpdateEnabled: true,
+        KeepAlive: "",
       });
       updateSettingsMutation.mutate(defaultSettings);
     }
@@ -558,6 +563,33 @@ export default function Settings() {
                           { value: 131072, label: "128k" },
                           { value: 262144, label: "256k" },
                         ]}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </Field>
+
+              {/* Keep model loaded (OLLAMA_KEEP_ALIVE) */}
+              <Field>
+                <div className="flex items-start space-x-3">
+                  <ClockIcon className="mt-1 h-5 w-5 flex-shrink-0 text-black dark:text-neutral-100" />
+                  <div className="w-full">
+                    <Label>Keep models loaded</Label>
+                    <Description>
+                      How long models stay loaded in memory after use. Use a
+                      duration like &quot;60m&quot; or &quot;1h&quot;,
+                      &quot;-1&quot; to keep loaded indefinitely, or
+                      &quot;0&quot; to unload immediately. Leave empty for the
+                      default (5m). Overridden by the OLLAMA_KEEP_ALIVE
+                      environment variable if set.
+                    </Description>
+                    <div className="mt-2">
+                      <Input
+                        value={settings.KeepAlive || ""}
+                        onChange={(e) =>
+                          handleChange("KeepAlive", e.target.value)
+                        }
+                        placeholder="5m"
                       />
                     </div>
                   </div>
