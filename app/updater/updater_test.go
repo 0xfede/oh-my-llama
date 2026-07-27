@@ -662,3 +662,33 @@ func TestTriggerImmediateCheck(t *testing.T) {
 		t.Fatalf("TriggerImmediateCheck did not cause additional check: initial=%d, final=%d", initialCount, finalCount)
 	}
 }
+
+func TestIsNewer(t *testing.T) {
+	tests := []struct {
+		name     string
+		offered  string
+		current  string
+		expected bool
+	}{
+		{"newer fork build of same upstream", "0.32.4-omll.2", "0.32.4-omll.1", true},
+		{"same fork build", "0.32.4-omll.1", "0.32.4-omll.1", false},
+		{"older fork build", "0.32.4-omll.1", "0.32.4-omll.2", false},
+		{"newer upstream beats any fork build", "0.32.5-omll.1", "0.32.4-omll.9", true},
+		{"older upstream never wins", "0.32.3-omll.9", "0.32.4-omll.1", false},
+		{"fork build 10 beats 9", "0.32.4-omll.10", "0.32.4-omll.9", true},
+		{"v prefix is tolerated on either side", "v0.32.5-omll.1", "0.32.4-omll.1", true},
+		// An un-stamped dev build must never be "upgraded" from the feed.
+		{"unstamped dev build", "0.32.4-omll.1", "0.0.0", true},
+		{"garbage offered version", "not-a-version", "0.32.4-omll.1", false},
+		{"garbage current version", "0.32.5-omll.1", "not-a-version", false},
+		{"empty offered version", "", "0.32.4-omll.1", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isNewer(tt.offered, tt.current); got != tt.expected {
+				t.Errorf("isNewer(%q, %q) = %v, want %v", tt.offered, tt.current, got, tt.expected)
+			}
+		})
+	}
+}
