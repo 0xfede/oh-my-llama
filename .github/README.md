@@ -1,4 +1,4 @@
-<p align="center"><img src="app/assets/omll/appicon.svg" alt="Oh My Llama" width="160"/></p>
+<p align="center"><img src="../app/assets/omll/appicon.png" alt="Oh My Llama" width="160"/></p>
 
 # Oh My Llama
 
@@ -7,8 +7,8 @@ that carries a couple of patches upstream has not taken, and that updates itself
 on its own channel so a stock Ollama update can never replace it.
 
 **Not affiliated with, sponsored by, or endorsed by Ollama.** Ollama is
-MIT-licensed; see [LICENSE](LICENSE) and
-[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+MIT-licensed; see [LICENSE](../LICENSE) and
+[THIRD-PARTY-LICENSES.md](../THIRD-PARTY-LICENSES.md).
 
 ## What is different
 
@@ -19,7 +19,10 @@ MIT-licensed; see [LICENSE](LICENSE) and
 - Own name, icon, bundle identifier and update feed, so it installs and updates
   side by side with a stock Ollama.
 
-Everything else is upstream, unmodified.
+Everything else is upstream, unmodified — including the root
+[README.md](../README.md), which is Ollama's own and is left alone so it keeps
+rebasing cleanly. This file lives in `.github/` because GitHub prefers it over
+the root one when rendering the repository page.
 
 ## Install
 
@@ -52,13 +55,13 @@ that symlink.
 ## How releases work
 
 The fork branch is always *an upstream release tag plus our patch commits*, with
-the current base recorded in [UPSTREAM_VERSION](UPSTREAM_VERSION).
+the current base recorded in [UPSTREAM_VERSION](../UPSTREAM_VERSION).
 
-1. [`oh-my-llama sync`](.github/workflows/oh-my-llama-sync.yaml) checks upstream
+1. [`oh-my-llama sync`](workflows/oh-my-llama-sync.yaml) checks upstream
    every 6 hours. On a new release it rebases the patch commits onto the new tag
    and pushes an `omll-v*` tag. If a patch stops applying it opens an issue and
    pushes nothing.
-2. [`oh-my-llama release`](.github/workflows/oh-my-llama-release.yaml) builds
+2. [`oh-my-llama release`](workflows/oh-my-llama-release.yaml) builds
    arm64, ad-hoc signs, and publishes a release plus `update.json`.
 
 Versions are `<upstream>-omll.<n>`, e.g. `0.32.4-omll.1`. semver reads `-omll.n`
@@ -68,7 +71,7 @@ release `omll.2` beats `omll.1`, and any `0.32.5-omll.1` beats every
 
 Installed copies poll `update.json` on the latest release. Because a static file
 cannot answer "you are already current" the way Ollama's endpoint does, the client
-compares versions itself (`isNewer` in [app/updater](app/updater/updater.go)).
+compares versions itself (`isNewer` in [app/updater](../app/updater/updater.go)).
 
 ## Building locally
 
@@ -91,7 +94,7 @@ To regenerate the icons from their SVG sources (needs `brew install librsvg`):
 ## Rebasing onto a new upstream release by hand
 
 Fork-specific identity is centralized in
-[app/branding/branding.go](app/branding/branding.go) and
-[app/branding/branding.h](app/branding/branding.h) so that a rebase touches as
+[app/branding/branding.go](../app/branding/branding.go) and
+[app/branding/branding.h](../app/branding/branding.h) so that a rebase touches as
 little as possible. The patches that do touch upstream files are the two feature
 patches, the branding call sites, and `scripts/build_darwin.sh`.
