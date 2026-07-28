@@ -7,6 +7,13 @@
 #
 # If a patch stops applying, the job stops and opens an issue rather than pushing
 # a half-merged tree.
+#
+# Pushing uses a deploy key (secret SYNC_DEPLOY_KEY) rather than GITHUB_TOKEN, for
+# two reasons, both of which are hard blocks rather than preferences:
+#   - GITHUB_TOKEN may not create or update files under .github/workflows, and the
+#     rebase carries upstream's own changes to its workflows along with it.
+#   - Pushes authenticated with GITHUB_TOKEN do not trigger other workflows, so the
+#     omll-v* tag would land silently and never start a build.
 name: oh-my-llama sync
 
 on:
@@ -31,6 +38,9 @@ jobs:
         with:
           # Full history: the rebase needs the recorded upstream base commit.
           fetch-depth: 0
+          # Check out over SSH with the deploy key so the later push is authorized
+          # as a plain user rather than as the Actions app.
+          ssh-key: ${{ secrets.SYNC_DEPLOY_KEY }}
 
       - name: Find the newest upstream release
         id: upstream
