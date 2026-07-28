@@ -48,4 +48,9 @@ for SPEC in "tray ollama" "tray-update ollamaUpdate"; do
     magick "$DEST/$NAME@2x.png" -channel RGB -negate "$DEST/${NAME}Dark@2x.png"
 done
 
+# Raster copy of the app icon for the README header: GitHub sanitizes inline SVG
+# and renders linked SVGs inconsistently, so the docs point at this instead.
+status "Building appicon.png"
+rsvg-convert -w 320 -h 320 "$SRC/appicon.svg" -o "$SRC/appicon.png"
+
 status "Wrote icons to $DEST"
