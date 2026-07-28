@@ -23,7 +23,12 @@ permissions:
 
 jobs:
   build:
+    # arm64 runner: the app is built arm64-only, and cross-compiling the Metal
+    # shaders is not worth the trouble for the handful of Apple Silicon Macs this
+    # is installed on. macos-15 rather than upstream's macos-26-xlarge because the
+    # xlarge runners are not available on free plans.
     runs-on: macos-15
+    timeout-minutes: 90
     env:
       # No Apple Developer ID: scripts/build_darwin.sh falls back to an ad-hoc
       # signature, which is enough for the updater's validity check.
@@ -58,6 +63,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Install cmake
+        run: |
+          set -euo pipefail
+          # The native build needs cmake; the macOS runner images ship it, but pin
+          # it explicitly so an image change cannot silently break the build.
+          brew list cmake >/dev/null 2>&1 || brew install cmake
+          cmake --version
+          # metal_v3 needs a working metal toolchain - fail here with a clear
+          # message rather than deep inside the cmake configure step.
+          xcrun --find metal
+          xcrun --sdk macosx --show-sdk-version
 
       - name: Build
         env:
@@ -97,6 +114,20 @@ jobs:
           set -euo pipefail
           (cd dist && shasum -a 256 OhMyLlama-darwin.zip OhMyLlama.dmg > sha256sum.txt)
           cat dist/sha256sum.txt
+
+      # Keep the artifacts even if publishing fails, so a bad tag or a token
+      # problem does not throw away a 40 minute build.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: OhMyLlama-${{ steps.version.outputs.VERSION }}
+          path: |
+            dist/OhMyLlama-darwin.zip
+            dist/OhMyLlama.dmg
+            dist/update.json
+            dist/sha256sum.txt
+          if-no-files-found: warn
+          retention-days: 14
 
       # The release tag is the bare version, because the updater parses the
       # version out of the download URL's path. The trigger tag (omll-v*) is
