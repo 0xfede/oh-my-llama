@@ -25,9 +25,13 @@ jobs:
   build:
     # arm64 runner: the app is built arm64-only, and cross-compiling the Metal
     # shaders is not worth the trouble for the handful of Apple Silicon Macs this
-    # is installed on. macos-15 rather than upstream's macos-26-xlarge because the
-    # xlarge runners are not available on free plans.
-    runs-on: macos-15
+    # is installed on.
+    #
+    # macos-26 rather than macos-15: arm64 builds both the metal_v3 and metal_v4
+    # MLX backends, and metal_v4 requires the macOS 26.2 SDK. macos-15 fails the
+    # cmake configure outright. Not upstream's macos-26-xlarge, which is not
+    # available on free plans.
+    runs-on: macos-26
     timeout-minutes: 90
     env:
       # No Apple Developer ID: scripts/build_darwin.sh falls back to an ad-hoc
@@ -71,10 +75,16 @@ jobs:
           # it explicitly so an image change cannot silently break the build.
           brew list cmake >/dev/null 2>&1 || brew install cmake
           cmake --version
-          # metal_v3 needs a working metal toolchain - fail here with a clear
+          # The MLX backends need a working metal toolchain, and metal_v4 needs the
+          # macOS 26.2 SDK. Check both here so an image change fails with a clear
           # message rather than deep inside the cmake configure step.
           xcrun --find metal
-          xcrun --sdk macosx --show-sdk-version
+          SDK=$(xcrun --sdk macosx --show-sdk-version)
+          echo "macOS SDK: $SDK"
+          if [ "$(printf '%s\n26.2\n' "$SDK" | sort -V | head -1)" != "26.2" ]; then
+            echo "::error::SDK $SDK is older than the 26.2 required by the metal_v4 MLX backend"
+            exit 1
+          fi
 
       - name: Build
         env:
