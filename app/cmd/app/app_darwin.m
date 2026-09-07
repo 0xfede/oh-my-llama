@@ -1282,8 +1282,113 @@ didCompleteWithError:(NSError *)error {
              atStart:YES];
 }
 
+// Where the cdhash the login agent was last registered against is remembered.
+// The app's own preferences domain, so no directory has to be created and a
+// wiped preferences file only costs one redundant re-registration.
+static NSString *const OMLLLoginAgentIdentityKey = @"omllLoginAgentCodeIdentity";
+
+// omllLaunchAgentProgramPath returns the executable launchd spawns for the login
+// agent, read from the same plist SMAppService registers so the two cannot drift.
+// Upstream points BundleProgram at a copy of the app binary inside a mock
+// Squirrel.framework, not at Contents/MacOS, and it is that copy the launch
+// constraint is pinned to.
+static NSString *omllLaunchAgentProgramPath(void) {
+    NSBundle *bundle = [NSBundle mainBundle];
+    NSString *plistPath = [bundle.bundlePath
+        stringByAppendingPathComponent:@"Contents/Library/LaunchAgents/"
+                                       OML_BUNDLE_ID @".plist"];
+    NSDictionary *plist =
+        [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSString *program = plist[@"BundleProgram"];
+    if (program.length == 0) {
+        return nil;
+    }
+    return [bundle.bundlePath stringByAppendingPathComponent:program];
+}
+
+// omllCodeIdentityForPath returns the cdhash of the code at path, hex encoded.
+// This is the identity macOS pins into an ad-hoc signed bundle's launch
+// constraint, so a change here is exactly what invalidates the registration.
+static NSString *omllCodeIdentityForPath(NSString *path) {
+    if (path.length == 0) {
+        return nil;
+    }
+    SecStaticCodeRef code = NULL;
+    NSURL *url = [NSURL fileURLWithPath:path];
+    if (SecStaticCodeCreateWithPath((__bridge CFURLRef)url, kSecCSDefaultFlags,
+                                    &code) != errSecSuccess) {
+        return nil;
+    }
+    CFDictionaryRef rawInfo = NULL;
+    OSStatus status =
+        SecCodeCopySigningInformation(code, kSecCSDefaultFlags, &rawInfo);
+    CFRelease(code);
+    if (status != errSecSuccess || rawInfo == NULL) {
+        return nil;
+    }
+    NSDictionary *info = (__bridge NSDictionary *)rawInfo;
+    NSData *cdhash = info[(__bridge NSString *)kSecCodeInfoUnique];
+    NSMutableString *hex = nil;
+    if (cdhash.length > 0) {
+        const uint8_t *bytes = cdhash.bytes;
+        hex = [NSMutableString stringWithCapacity:cdhash.length * 2];
+        for (NSUInteger i = 0; i < cdhash.length; i++) {
+            [hex appendFormat:@"%02x", bytes[i]];
+        }
+    }
+    // This file is compiled without ARC, so the dictionary has to be released by
+    // hand - after hex has copied everything needed out of it.
+    CFRelease(rawInfo);
+    return hex;
+}
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
+// omllLoginAgentNeedsReregistration reports whether the login agent was
+// registered by a different build of this app than the one now running.
+//
+// SMAppService pins a launch constraint when it registers an agent. A
+// Developer ID signature lets macOS pin the team and signing identifier, which
+// survive updates - but this bundle is ad-hoc signed and so has no team, and
+// macOS falls back to pinning the raw cdhash. Every self-update rewrites the
+// binary, the cdhash changes, and launchd then refuses to spawn the agent:
+//
+//     last exit reason = OS_REASON_CODESIGNING
+//     properties = ... needs LWCR update | has LWCR
+//
+// with SIGKILL (Code Signature Invalid) crash reports naming a Launch
+// Constraint Violation. [service status] still reports Enabled throughout,
+// because from BTM's point of view nothing is wrong, so status alone cannot be
+// trusted to mean "will actually launch".
+//
+// Comparing the agent program's cdhash against the one recorded at the last
+// successful registration catches exactly this case. An absent record - a fresh
+// install, a wiped preferences file, or any copy that predates this check -
+// counts as stale, which is what heals bundles already broken by an update.
+static BOOL omllLoginAgentNeedsReregistration(void) {
+    NSString *identity = omllCodeIdentityForPath(omllLaunchAgentProgramPath());
+    if (identity == nil) {
+        // Without a cdhash to compare there is nothing to conclude, and
+        // re-registering on every launch would notify the user each time.
+        appLogInfo(@"unable to read the login agent's code identity, leaving "
+                   @"its registration alone");
+        return NO;
+    }
+    NSString *registered = [[NSUserDefaults standardUserDefaults]
+        stringForKey:OMLLLoginAgentIdentityKey];
+    return ![identity isEqualToString:registered];
+}
+
+static void omllRecordLoginAgentIdentity(void) {
+    NSString *identity = omllCodeIdentityForPath(omllLaunchAgentProgramPath());
+    if (identity == nil) {
+        return;
+    }
+    [[NSUserDefaults standardUserDefaults] setObject:identity
+                                             forKey:OMLLLoginAgentIdentityKey];
+}
+
 - (void)registerSelfAsLoginItem:(BOOL)firstTimeRun {
     appLogInfo(@"using v13+ SMAppService for login registration");
     // Maps to the file <BundleName>.app/Contents/Library/LaunchAgents/<BundleID>.plist
@@ -1292,15 +1397,22 @@ didCompleteWithError:(NSError *)error {
         appLogInfo(@"SMAppService failed to find service for " OML_BUNDLE_ID @".plist");
         return;
     }
+    BOOL refreshLaunchConstraint = NO;
     SMAppServiceStatus status = [service status];
     switch (status) {
         case SMAppServiceStatusNotRegistered:
             appLogInfo(@"service not registered, registering now");
             break;
         case SMAppServiceStatusEnabled:
-            appLogInfo(@"service is already enabled, no need to register again");
-            return;
-        case SMAppServiceStatusRequiresApproval: 
+            if (!omllLoginAgentNeedsReregistration()) {
+                appLogInfo(@"service is already enabled, no need to register again");
+                return;
+            }
+            appLogInfo(@"service is enabled but was registered for a different "
+                       @"build, re-registering to refresh its launch constraint");
+            refreshLaunchConstraint = YES;
+            break;
+        case SMAppServiceStatusRequiresApproval:
             // User has disabled our login behavior explicitly so leave it as is
             appLogInfo(@"service is currently disabled and will not start at login");
             return;
@@ -1311,11 +1423,22 @@ didCompleteWithError:(NSError *)error {
             appLogInfo([NSString stringWithFormat:@"unexpected status: %ld", (long)status]);
             break;
     }
+    if (refreshLaunchConstraint) {
+        // A second register() on an already-registered service is a no-op, so the
+        // stale constraint has to be dropped first. If this fails, register()
+        // below is still worth attempting.
+        NSError *unregisterError = nil;
+        if (![service unregisterAndReturnError:&unregisterError]) {
+            appLogInfo([NSString stringWithFormat:@"failed to unregister the "
+                @"stale login agent: %@", unregisterError]);
+        }
+    }
     NSError *error = nil;
     if (![service registerAndReturnError:&error]) {
         appLogInfo([NSString stringWithFormat:@"Failed to register %@ as a login item: %@", NSBundle.mainBundle.bundleURL, error]);
         return;
     }
+    omllRecordLoginAgentIdentity();
     return;
 }
 
