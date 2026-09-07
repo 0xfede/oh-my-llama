@@ -82,6 +82,17 @@ jobs:
           git log --oneline "$OLD"..HEAD
 
           if ! git rebase --onto "$NEW" "$OLD"; then
+            # Capture which patch stopped and where before aborting, since the
+            # abort throws that away and it is the first thing anyone fixing this
+            # by hand needs to know.
+            {
+              echo "details<<OMLL_DETAILS"
+              echo "Stopped replaying: $(git log -1 --format='%h %s' REBASE_HEAD 2>/dev/null || echo 'unknown')"
+              echo
+              echo 'Conflicted paths:'
+              git diff --name-only --diff-filter=U 2>/dev/null || echo '(none reported)'
+              echo OMLL_DETAILS
+            } >> "$GITHUB_OUTPUT"
             git rebase --abort || true
             echo "conflict=true" >> "$GITHUB_OUTPUT"
             exit 1
@@ -104,7 +115,11 @@ jobs:
           # dimensions correctly - see isNewer in app/updater.
           BASE="${NEW#v}"
           N=1
-          while gh release view "$BASE-omll.$N" >/dev/null 2>&1; do
+          # --repo is required, not cosmetic: the rebase step adds an "upstream"
+          # remote, and gh resolves the base repo from a remote named upstream
+          # ahead of origin, so an unqualified call here asks ollama/ollama whether
+          # our version exists - always no, which would silently reuse -omll.1.
+          while gh release view --repo "$GITHUB_REPOSITORY" "$BASE-omll.$N" >/dev/null 2>&1; do
             N=$((N + 1))
           done
           echo "version=$BASE-omll.$N" | tee -a "$GITHUB_OUTPUT"
@@ -121,32 +136,79 @@ jobs:
           git tag "omll-v$VERSION"
           git push origin "omll-v$VERSION"
 
-      - name: Open an issue if the rebase failed
-        if: failure() && steps.rebase.outputs.conflict == 'true'
+      # Report any failure, not just a rebase conflict - a failed push or version
+      # lookup leaves the fork just as stuck, and silently.
+      #
+      # The run summary and the error annotation come first because they need no
+      # token permissions at all, and they are what the failure email links to.
+      # Filing an issue is a best-effort extra on top: it is the part that can be
+      # refused, so it must never be the reason a real failure goes unreported,
+      # hence no set -e here and the trailing || true.
+      - name: Report a failed sync
+        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
           NEW: ${{ steps.upstream.outputs.latest }}
           OLD: ${{ steps.upstream.outputs.current }}
+          CONFLICT: ${{ steps.rebase.outputs.conflict }}
+          DETAILS: ${{ steps.rebase.outputs.details }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          set -euo pipefail
-          gh issue create \
-            --title "Rebase onto upstream $NEW needs manual help" \
-            --body "$(cat <<EOF
-          Automatic rebase of the fork patches from \`$OLD\` onto \`$NEW\` hit a conflict, so nothing was pushed.
+          set -uo pipefail
+
+          TITLE="oh-my-llama sync onto upstream ${NEW:-unknown} failed"
+          if [ "${CONFLICT:-}" = "true" ]; then
+            WHAT="Replaying the fork patches from \`${OLD:-?}\` onto \`${NEW:-?}\` hit a conflict, so nothing was pushed."
+          else
+            WHAT="The sync from \`${OLD:-?}\` to \`${NEW:-?}\` failed before anything was tagged. See the failed step in the run log."
+          fi
+
+          # Fenced separately: DETAILS is multi-line, which a ${x:+...} inside the
+          # heredoc below would not survive cleanly.
+          DETAILS_BLOCK=""
+          if [ -n "${DETAILS:-}" ]; then
+            DETAILS_BLOCK=$(printf '```\n%s\n```' "$DETAILS")
+          fi
+
+          BODY=$(cat <<EOF
+          $WHAT
+
+          $DETAILS_BLOCK
 
           To fix locally:
 
           \`\`\`sh
+          git remote add upstream https://github.com/ollama/ollama.git   # once
           git fetch upstream --tags
-          git rebase --onto $NEW $OLD
+          git rebase --onto ${NEW:-NEW} ${OLD:-OLD}
           # resolve, then:
-          echo $NEW > UPSTREAM_VERSION
-          git commit -am "oh-my-llama: track upstream $NEW"
+          echo ${NEW:-NEW} > UPSTREAM_VERSION
+          git commit -am "oh-my-llama: track upstream ${NEW:-NEW}"
           git push --force-with-lease
           \`\`\`
 
-          Then re-run \`oh-my-llama sync\`, or tag the release by hand.
+          Then re-run \`oh-my-llama sync\`, or tag \`omll-v<version>\` by hand to build a release.
 
-          [Failed run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          [Failed run]($RUN_URL)
           EOF
-          )"
+          )
+
+          printf '## %s\n\n%s\n' "$TITLE" "$BODY" >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=$TITLE::$WHAT See this run's summary for what to do."
+
+          # --repo everywhere below: without it gh targets ollama/ollama, because
+          # the rebase step leaves an "upstream" remote behind and gh prefers that
+          # name over origin when resolving the base repo. That is what turned this
+          # step into "Resource not accessible by integration (createIssue)".
+          EXISTING=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title 2>/dev/null \
+            | jq -r --arg t "$TITLE" '(. // []) | map(select(.title == $t)) | .[0].number // empty' 2>/dev/null)
+          if [ -n "$EXISTING" ]; then
+            # Do not open a fresh issue every six hours for the same stuck rebase.
+            gh issue comment "$EXISTING" --repo "$GITHUB_REPOSITORY" \
+              --body "Still failing: [run]($RUN_URL)" || true
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "$TITLE" --body "$BODY" \
+              || echo "could not file an issue; the run summary above is the report"
+          fi
