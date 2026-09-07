@@ -174,6 +174,12 @@ func (db *database) init() error {
 
 // migrate handles database schema migrations
 func (db *database) migrate() error {
+	// Oh My Llama: undo an older fork build's claim on an upstream schema version
+	// before the version is read. See app/store/keepalive_omll.go.
+	if err := db.omllRepairSchema(); err != nil {
+		return fmt.Errorf("repair fork schema: %w", err)
+	}
+
 	// Get current schema version
 	version, err := db.getSchemaVersion()
 	if err != nil {
@@ -290,6 +296,12 @@ func (db *database) migrate() error {
 			// This might happen during development
 			version = currentSchemaVersion
 		}
+	}
+
+	// Oh My Llama: the fork's own columns, added after upstream's numbered chain
+	// and idempotently, so they never occupy a version upstream will reuse.
+	if err := db.omllAddKeepAliveColumn(); err != nil {
+		return fmt.Errorf("migrate fork schema: %w", err)
 	}
 
 	return nil
@@ -1241,6 +1253,11 @@ func (db *database) getSettings() (Settings, error) {
 		return Settings{}, fmt.Errorf("get settings: %w", err)
 	}
 
+	// Oh My Llama: read separately to keep this patch out of the column list above.
+	if s.KeepAlive, err = db.omllGetKeepAlive(); err != nil {
+		return Settings{}, err
+	}
+
 	return s, nil
 }
 
@@ -1256,6 +1273,11 @@ func (db *database) setSettings(s Settings) error {
 	`, s.Expose, s.Survey, s.Browser, s.Models, s.Agent, s.Tools, s.WorkingDir, s.ContextLength, s.TurboEnabled, s.WebSearchEnabled, s.SelectedModel, s.SidebarOpen, lastHomeView, s.OnboardingVersion, s.ThinkEnabled, s.ThinkLevel, s.AutoUpdateEnabled, s.ClaudeDesktopUsed)
 	if err != nil {
 		return fmt.Errorf("set settings: %w", err)
+	}
+
+	// Oh My Llama: written separately to keep this patch out of the column list above.
+	if err := db.omllSetKeepAlive(s.KeepAlive); err != nil {
+		return err
 	}
 	return nil
 }

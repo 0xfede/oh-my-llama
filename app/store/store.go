@@ -178,6 +178,13 @@ type Settings struct {
 
 	// ClaudeDesktopUsed records whether Claude Desktop has ever been connected through Ollama.
 	ClaudeDesktopUsed bool
+
+	// KeepAlive specifies how long models stay loaded in memory (using OLLAMA_KEEP_ALIVE).
+	// Accepts a Go duration ("60m", "1h", "30s"), a bare integer in seconds, "-1" for
+	// indefinitely, or "0" to unload immediately. Empty means use the server default (5m).
+	// If OLLAMA_KEEP_ALIVE is already set in the environment it takes precedence over this.
+	// Stored and loaded by app/store/keepalive_omll.go, outside upstream's column lists.
+	KeepAlive string
 }
 
 // Keep in sync with CURRENT_ONBOARDING_VERSION in app/ui/app/src/lib/onboarding.ts.

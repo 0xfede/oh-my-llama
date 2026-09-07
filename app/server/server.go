@@ -263,6 +263,13 @@ func (s *Server) cmd(ctx context.Context) (*exec.Cmd, error) {
 	if settings.ContextLength > 0 {
 		env["OLLAMA_CONTEXT_LENGTH"] = strconv.Itoa(settings.ContextLength)
 	}
+	// Apply the keep-alive setting unless OLLAMA_KEEP_ALIVE is already set in the
+	// environment (e.g. via `launchctl setenv`), in which case the env var wins.
+	if settings.KeepAlive != "" {
+		if _, ok := env["OLLAMA_KEEP_ALIVE"]; !ok {
+			env["OLLAMA_KEEP_ALIVE"] = settings.KeepAlive
+		}
+	}
 	if cloudDisabled {
 		env["OLLAMA_NO_CLOUD"] = "1"
 	} else {
