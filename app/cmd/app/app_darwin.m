@@ -224,7 +224,7 @@ static NSImage *integrationAppIcon(NSString *appName,
         self.integrationSwitch = [[MenuSwitch alloc] initWithFrame:NSZeroRect];
         [self.integrationSwitch setTarget:target];
         [self.integrationSwitch setAction:toggleAction];
-        [self.integrationSwitch setAccessibilityLabel:[NSString stringWithFormat:@"Use Ollama with %@", title]];
+        [self.integrationSwitch setAccessibilityLabel:[NSString stringWithFormat:@"Use " OML_NAME @" with %@", title]];
         [self.integrationSwitch setTranslatesAutoresizingMaskIntoConstraints:NO];
 
         [self addSubview:self.controlSurface];
@@ -320,8 +320,8 @@ static NSImage *integrationAppIcon(NSString *appName,
         : [NSColor clearColor];
     self.controlSurface.layer.backgroundColor = surfaceColor.CGColor;
     self.integrationTitleLabel.textColor = [NSColor labelColor];
-    NSString *status = active ? (self.activeStatusText ?: @"Using Ollama")
-                              : (self.inactiveStatusText ?: @"Use Ollama models");
+    NSString *status = active ? (self.activeStatusText ?: @"Using " OML_NAME)
+                              : (self.inactiveStatusText ?: @"Use " OML_NAME @" models");
     BOOL hasStatus = status.length > 0;
     self.titleWithStatusConstraint.active = hasStatus;
     self.titleCenteredConstraint.active = !hasStatus;
@@ -704,7 +704,7 @@ static NSImage *ollamaApplicationIcon(void) {
     BOOL configured = installed && IsClaudeGatewayConfigured();
     NSString *failureStatus = portConflict
         ? [NSString stringWithFormat:@"Port %d is in use", ClaudeGatewayPort()]
-        : (startFailed ? @"Unable to use Ollama" : nil);
+        : (startFailed ? @"Unable to use " OML_NAME : nil);
     self.claudeAppEnabled = configured;
     self.claudeAppReady = configured && !startFailed;
     [self.claudeAppRow setActiveStatusText:configured ? failureStatus : nil];
@@ -965,8 +965,9 @@ static NSImage *ollamaApplicationIcon(void) {
                        code:3
                    userInfo:@{NSLocalizedDescriptionKey:
                        chatGPT
-                           ? @"Ollama could not prepare the ChatGPT download."
-                           : @"Ollama could not authenticate the download request."}];
+                           ? OML_NAME @" could not prepare the ChatGPT download."
+                           : OML_NAME @" could not authenticate the download "
+                                      @"request."}];
         if (chatGPT) {
             [self showChatGPTDownloadFailure:error];
         } else {
@@ -1285,7 +1286,7 @@ didCompleteWithError:(NSError *)error {
         [installAlert setIcon:ollamaApplicationIcon()];
         [installAlert setMessageText:@"Claude is not installed"];
         [installAlert setInformativeText:
-            @"Download Claude to add Ollama models to the Claude app."];
+            @"Download Claude to add " OML_NAME @" models to the Claude app."];
         [installAlert addButtonWithTitle:@"Download Claude"];
         [installAlert addButtonWithTitle:@"Cancel"];
         if ([installAlert runModal] == NSAlertFirstButtonReturn) {
@@ -1302,11 +1303,11 @@ didCompleteWithError:(NSError *)error {
         [restartAlert setAlertStyle:NSAlertStyleWarning];
         [restartAlert setIcon:ollamaApplicationIcon()];
         [restartAlert setMessageText:enabled
-            ? @"Restart Claude Desktop to use Ollama?"
-            : @"Restart Claude Desktop to remove Ollama?"];
+            ? @"Restart Claude Desktop to use " OML_NAME @"?"
+            : @"Restart Claude Desktop to remove " OML_NAME @"?"];
         [restartAlert setInformativeText:enabled
-            ? @"Claude Desktop must restart to use Ollama. Any running task will stop."
-            : @"Claude Desktop must restart to remove Ollama. Any running task will stop."];
+            ? @"Claude Desktop must restart to use " OML_NAME @". Any running task will stop."
+            : @"Claude Desktop must restart to remove " OML_NAME @". Any running task will stop."];
         [restartAlert addButtonWithTitle:@"Restart Claude Desktop"];
         [restartAlert addButtonWithTitle:@"Cancel"];
         if ([restartAlert runModal] != NSAlertFirstButtonReturn) {
@@ -1334,13 +1335,14 @@ didCompleteWithError:(NSError *)error {
                 [alert setMessageText:portConflict
                     ? [NSString stringWithFormat:@"Port %d is already in use", ClaudeGatewayPort()]
                     : (enabled
-                        ? @"Unable to use Ollama with Claude"
-                        : @"Unable to remove Ollama from Claude")];
+                        ? @"Unable to use " OML_NAME @" with Claude"
+                        : @"Unable to remove " OML_NAME @" from Claude")];
                 [alert setInformativeText:portConflict
                     ? [NSString stringWithFormat:@"Change OLLAMA_HOST or quit the app using port %d, then try again.", ClaudeGatewayPort()]
                     : (gatewayError.length > 0
                         ? gatewayError
-                        : @"Ollama could not update Claude. Check the Ollama log for details.")];
+                        : OML_NAME @" could not update Claude. Check the "
+                                   OML_NAME @" log for details.")];
                 [alert runModal];
                 return;
             }
@@ -1544,9 +1546,9 @@ didCompleteWithError:(NSError *)error {
         NSAlert *alert = [[NSAlert alloc] init];
         [alert setAlertStyle:NSAlertStyleWarning];
         [alert setIcon:ollamaApplicationIcon()];
-        [alert setMessageText:@"Restart Claude before quitting Ollama?"];
+        [alert setMessageText:@"Restart Claude before quitting " OML_NAME @"?"];
         [alert setInformativeText:
-            @"Claude must restart before Ollama quits. Any running task will stop."];
+            @"Claude must restart before " OML_NAME @" quits. Any running task will stop."];
         [alert addButtonWithTitle:@"Restart Claude and Quit"];
         [alert addButtonWithTitle:@"Cancel"];
         if ([alert runModal] != NSAlertFirstButtonReturn) {
@@ -1575,9 +1577,10 @@ didCompleteWithError:(NSError *)error {
             NSAlert *alert = [[NSAlert alloc] init];
             [alert setAlertStyle:NSAlertStyleWarning];
             [alert setIcon:ollamaApplicationIcon()];
-            [alert setMessageText:@"Unable to quit Ollama"];
+            [alert setMessageText:@"Unable to quit " OML_NAME];
             [alert setInformativeText:
-                @"Ollama couldn’t update Claude, so it is still running. Check the Ollama log and try again."];
+                OML_NAME @" couldn’t update Claude, so it is still running. "
+                         @"Check the " OML_NAME @" log and try again."];
             [alert runModal];
         });
     });
@@ -1872,15 +1875,20 @@ decidePolicyForNavigationAction:(WKNavigationAction *)action
     [alert setAlertStyle:NSAlertStyleWarning];
     [alert setIcon:ollamaApplicationIcon()];
 
+    // The strings matched here are what window.confirm() passes up from the web
+    // UI, so they are effectively an identifier shared with Onboarding.tsx and
+    // deliberately keep saying "Ollama" - only the text this alert displays is
+    // rebranded. Rebranding one side alone drops these back to the generic
+    // "Confirm" alert below.
     if ([message isEqualToString:@"Restart Claude Desktop to use Ollama? Any running task will stop."]) {
-        [alert setMessageText:@"Restart Claude Desktop to use Ollama?"];
+        [alert setMessageText:@"Restart Claude Desktop to use " OML_NAME @"?"];
         [alert setInformativeText:
-            @"Claude Desktop must restart to use Ollama. Any running task will stop."];
+            @"Claude Desktop must restart to use " OML_NAME @". Any running task will stop."];
         [alert addButtonWithTitle:@"Restart Claude Desktop"];
     } else if ([message isEqualToString:@"Restart Claude Desktop to remove Ollama? Any running task will stop."]) {
-        [alert setMessageText:@"Restart Claude Desktop to remove Ollama?"];
+        [alert setMessageText:@"Restart Claude Desktop to remove " OML_NAME @"?"];
         [alert setInformativeText:
-            @"Claude Desktop must restart to remove Ollama. Any running task will stop."];
+            @"Claude Desktop must restart to remove " OML_NAME @". Any running task will stop."];
         [alert addButtonWithTitle:@"Restart Claude Desktop"];
     } else if ([message hasPrefix:@"Restart ChatGPT to add Ollama models?"]) {
         configureChatGPTRestartAlert(alert, ChatGPTRestartActionAddModels);

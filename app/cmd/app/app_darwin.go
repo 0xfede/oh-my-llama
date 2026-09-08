@@ -120,7 +120,7 @@ var (
 	claudeLocalModelsResolver = currentClaudeDesktopLocalModels
 )
 
-var errClaudeDesktopAccessUnavailable = errors.New("Ollama couldn't verify the selected models. Try again")
+var errClaudeDesktopAccessUnavailable = errors.New(branding.Name + " couldn't verify the selected models. Try again")
 
 // TODO(jmorganca): pre-create the window and pass
 // it to the webview instead of using the internal one
@@ -1092,21 +1092,23 @@ func validateClaudeDesktopModels(models []proxy.ClaudeDesktopModel, state proxy.
 
 	// Prefer the action that resolves the broadest part of the selected set.
 	if _, ok := reasons[proxy.ClaudeDesktopAccessCloudOff]; ok {
-		return errors.New("Cloud models are off. Choose an installed model in Ollama Settings")
+		return errors.New("Cloud models are off. Choose an installed model in " + branding.Name + " Settings")
 	}
 	if _, ok := reasons[proxy.ClaudeDesktopAccessSignInRequired]; ok {
-		return errors.New("Sign in to Ollama or choose an installed model in Ollama Settings")
+		// "Sign in to Ollama" stays: that is the ollama.com account behind cloud
+		// models, not this app.
+		return errors.New("Sign in to Ollama or choose an installed model in " + branding.Name + " Settings")
 	}
 	if _, ok := reasons[proxy.ClaudeDesktopAccessUpgradeRequired]; ok {
 		return errors.New("Select another model in Settings to connect Claude")
 	}
 	if _, ok := reasons[proxy.ClaudeDesktopAccessModelNotInstalled]; ok {
-		return errors.New("Install the selected model or choose another model in Ollama Settings")
+		return errors.New("Install the selected model or choose another model in " + branding.Name + " Settings")
 	}
 	if _, ok := reasons[proxy.ClaudeDesktopAccessVerificationUnavailable]; ok {
 		return errClaudeDesktopAccessUnavailable
 	}
-	return errors.New("Choose at least one model in Ollama Settings")
+	return errors.New("Choose at least one model in " + branding.Name + " Settings")
 }
 
 func claudeGatewayPort() (string, error) {
