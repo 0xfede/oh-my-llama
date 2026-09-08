@@ -426,6 +426,11 @@ func getStagedUpdate() string {
 		// Shouldn't happen
 		slog.Warn("multiple update downloads found, using first one", "bundles", files)
 	}
+	// Nothing below here compares versions, so a leftover download would install
+	// itself over a newer build - see staleStagedUpdate.
+	if staleStagedUpdate(files[0]) {
+		return ""
+	}
 	return files[0]
 }
 
