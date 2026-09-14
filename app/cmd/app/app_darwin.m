@@ -1725,10 +1725,17 @@ static void omllRecordLoginAgentIdentity(void) {
 //
 // Calling it here puts a process boundary in between: this process unregisters and
 // exits, the new build starts, and by the time it reaches registerSelfAsLoginItem
-// the job is long gone, so it takes the plain "not registered" path and launchd
-// pins the constraint to the binary it is actually about to spawn. If the new
-// build never gets that far, the agent is left unregistered, which
-// omllLoginAgentNeedsReregistration already treats as stale.
+// launchd has finished dropping the job, so the register() there creates one from
+// scratch and the constraint gets pinned to the binary launchd is actually about to
+// spawn. Which branch of registerSelfAsLoginItem does that register() is not worth
+// relying on: [service status] keeps reporting Enabled for a while after the job is
+// gone (it answers from the Background Task Management database, not from launchd -
+// verified by hand: a job removed with launchctl bootout still read as Enabled).
+// Clearing OMLLLoginAgentIdentityKey above is what makes the incoming build take the
+// refresh branch in that case, and either branch ends up registering against a job
+// that no longer exists, which is the whole point. If the new build never gets that
+// far, the agent is left unregistered, which omllLoginAgentNeedsReregistration
+// already treats as stale.
 void omllUnregisterLoginAgentForUpgrade(void) {
     SMAppService *service =
         [SMAppService agentServiceWithPlistName:OML_BUNDLE_ID @".plist"];
