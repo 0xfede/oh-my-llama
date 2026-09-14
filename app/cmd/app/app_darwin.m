@@ -1813,6 +1813,16 @@ void omllUnregisterLoginAgentForUpgrade(void) {
             // bundle replaced by hand still does. Best effort: registering at the
             // deadline is no worse than registering straight away, which is what
             // this did before.
+            //
+            // And "best effort" is the operative part: waiting here is known not to
+            // be enough. Going 0.34.0-omll.1 -> .2 through this branch, the status
+            // dropped below Enabled inside the second (no warning below was logged)
+            // and launchd still killed the spawn 0.5s later with
+            // OS_REASON_CODESIGNING. The status comes from the Background Task
+            // Management database, so it says nothing about whether launchd has let
+            // go of the job yet. Only the process boundary above is reliable; a
+            // bundle replaced by hand therefore still loses its login agent until
+            // the next update re-creates the job.
             NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
             while ([service status] == SMAppServiceStatusEnabled &&
                    [deadline timeIntervalSinceNow] > 0) {
