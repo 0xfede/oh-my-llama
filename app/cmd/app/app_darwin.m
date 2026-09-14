@@ -1708,6 +1708,52 @@ static void omllRecordLoginAgentIdentity(void) {
                                              forKey:OMLLLoginAgentIdentityKey];
 }
 
+// omllUnregisterLoginAgentForUpgrade drops the login agent's registration on the
+// way out of an upgrade, so the build that replaced this one registers the agent
+// from scratch instead of re-registering over a job launchd has already pinned to
+// the outgoing build's cdhash. Declared for Go in loginagent_omll_darwin.go.
+//
+// Doing the refresh inside one process does not work, which is what
+// registerSelfAsLoginItem below has been attempting: unregisterAndReturnError:
+// returns before launchd has finished tearing the job down, so the register()
+// that follows lands on the job that is still there. launchd flags it
+// "needs LWCR update" and spawns it for RunAtLoad anyway, still checked against
+// the old constraint, and kills the spawn with SIGKILL (Code Signature Invalid).
+// That is the "Squirrel quit unexpectedly" report users see once per update - the
+// crash report names a CODESIGNING / Launch Constraint Violation, and the app log
+// shows the re-registration 28ms ahead of it.
+//
+// Calling it here puts a process boundary in between: this process unregisters and
+// exits, the new build starts, and by the time it reaches registerSelfAsLoginItem
+// the job is long gone, so it takes the plain "not registered" path and launchd
+// pins the constraint to the binary it is actually about to spawn. If the new
+// build never gets that far, the agent is left unregistered, which
+// omllLoginAgentNeedsReregistration already treats as stale.
+void omllUnregisterLoginAgentForUpgrade(void) {
+    SMAppService *service =
+        [SMAppService agentServiceWithPlistName:OML_BUNDLE_ID @".plist"];
+    if (service == nil) {
+        return;
+    }
+    if ([service status] != SMAppServiceStatusEnabled) {
+        // Nothing of ours to drop: either it was never registered, or the user
+        // turned it off in System Settings, which registerSelfAsLoginItem
+        // deliberately leaves alone.
+        return;
+    }
+    NSError *error = nil;
+    if (![service unregisterAndReturnError:&error]) {
+        appLogInfo([NSString stringWithFormat:@"failed to unregister the login "
+            @"agent before handing over to the new build: %@", error]);
+        return;
+    }
+    // The recorded identity describes the registration that just went away.
+    [[NSUserDefaults standardUserDefaults]
+        removeObjectForKey:OMLLLoginAgentIdentityKey];
+    appLogInfo(@"unregistered the login agent so the new build can register it "
+               @"against its own launch constraint");
+}
+
 - (void)registerSelfAsLoginItem:(BOOL)firstTimeRun {
     appLogInfo(@"using v13+ SMAppService for login registration");
     // Maps to the file <BundleName>.app/Contents/Library/LaunchAgents/<BundleID>.plist
@@ -1750,6 +1796,25 @@ static void omllRecordLoginAgentIdentity(void) {
         if (![service unregisterAndReturnError:&unregisterError]) {
             appLogInfo([NSString stringWithFormat:@"failed to unregister the "
                 @"stale login agent: %@", unregisterError]);
+        } else {
+            // Registering again before launchd has finished dropping the job is
+            // what leaves the old constraint in place and gets the RunAtLoad spawn
+            // killed, so wait for the status to change rather than assuming the
+            // unregister took effect immediately. Updates installed by the updater
+            // no longer reach this branch at all - the unregister happens in the
+            // outgoing process, see omllUnregisterLoginAgentForUpgrade - but a
+            // bundle replaced by hand still does. Best effort: registering at the
+            // deadline is no worse than registering straight away, which is what
+            // this did before.
+            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
+            while ([service status] == SMAppServiceStatusEnabled &&
+                   [deadline timeIntervalSinceNow] > 0) {
+                [NSThread sleepForTimeInterval:0.05];
+            }
+            if ([service status] == SMAppServiceStatusEnabled) {
+                appLogInfo(@"the login agent still reports as registered a second "
+                           @"after unregistering it; registering again anyway");
+            }
         }
     }
     NSError *error = nil;
