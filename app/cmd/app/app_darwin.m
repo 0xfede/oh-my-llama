@@ -1601,166 +1601,49 @@ didCompleteWithError:(NSError *)error {
              atStart:YES];
 }
 
-// Where the cdhash the login agent was last registered against is remembered.
-// The app's own preferences domain, so no directory has to be created and a
-// wiped preferences file only costs one redundant re-registration.
-static NSString *const OMLLLoginAgentIdentityKey = @"omllLoginAgentCodeIdentity";
-
-// omllLaunchAgentProgramPath returns the executable launchd spawns for the login
-// agent, read from the same plist SMAppService registers so the two cannot drift.
-// Upstream points BundleProgram at a copy of the app binary inside a mock
-// Squirrel.framework, not at Contents/MacOS, and it is that copy the launch
-// constraint is pinned to.
-static NSString *omllLaunchAgentProgramPath(void) {
-    NSBundle *bundle = [NSBundle mainBundle];
-    NSString *plistPath = [bundle.bundlePath
-        stringByAppendingPathComponent:@"Contents/Library/LaunchAgents/"
-                                       OML_BUNDLE_ID @".plist"];
-    NSDictionary *plist =
-        [NSDictionary dictionaryWithContentsOfFile:plistPath];
-    NSString *program = plist[@"BundleProgram"];
-    if (program.length == 0) {
-        return nil;
-    }
-    return [bundle.bundlePath stringByAppendingPathComponent:program];
-}
-
-// omllCodeIdentityForPath returns the cdhash of the code at path, hex encoded.
-// This is the identity macOS pins into an ad-hoc signed bundle's launch
-// constraint, so a change here is exactly what invalidates the registration.
-static NSString *omllCodeIdentityForPath(NSString *path) {
-    if (path.length == 0) {
-        return nil;
-    }
-    SecStaticCodeRef code = NULL;
-    NSURL *url = [NSURL fileURLWithPath:path];
-    if (SecStaticCodeCreateWithPath((__bridge CFURLRef)url, kSecCSDefaultFlags,
-                                    &code) != errSecSuccess) {
-        return nil;
-    }
-    CFDictionaryRef rawInfo = NULL;
-    OSStatus status =
-        SecCodeCopySigningInformation(code, kSecCSDefaultFlags, &rawInfo);
-    CFRelease(code);
-    if (status != errSecSuccess || rawInfo == NULL) {
-        return nil;
-    }
-    NSDictionary *info = (__bridge NSDictionary *)rawInfo;
-    NSData *cdhash = info[(__bridge NSString *)kSecCodeInfoUnique];
-    NSMutableString *hex = nil;
-    if (cdhash.length > 0) {
-        const uint8_t *bytes = cdhash.bytes;
-        hex = [NSMutableString stringWithCapacity:cdhash.length * 2];
-        for (NSUInteger i = 0; i < cdhash.length; i++) {
-            [hex appendFormat:@"%02x", bytes[i]];
-        }
-    }
-    // This file is compiled without ARC, so the dictionary has to be released by
-    // hand - after hex has copied everything needed out of it.
-    CFRelease(rawInfo);
-    return hex;
-}
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
-// omllLoginAgentNeedsReregistration reports whether the login agent was
-// registered by a different build of this app than the one now running.
+// A note for the next person tempted to heal the login agent from inside the app,
+// because two shipped attempts (0.33.3-omll.2 and 0.34.0-omll.2) both failed:
+// it cannot be done, and trying is worse than doing nothing.
 //
-// SMAppService pins a launch constraint when it registers an agent. A
-// Developer ID signature lets macOS pin the team and signing identifier, which
-// survive updates - but this bundle is ad-hoc signed and so has no team, and
-// macOS falls back to pinning the raw cdhash. Every self-update rewrites the
-// binary, the cdhash changes, and launchd then refuses to spawn the agent:
+// SMAppService pins a launch constraint (LWCR) when it registers an agent. With a
+// Developer ID signature macOS pins the team and signing identifier, which survive
+// updates. This bundle is ad-hoc signed, so there is no team and macOS pins the
+// cdhash of the agent's program instead - and that program is a copy of the app's
+// own versioned binary (see the mock Squirrel.framework in build_darwin.sh), so its
+// cdhash necessarily changes with every release. launchd then refuses to spawn it:
 //
 //     last exit reason = OS_REASON_CODESIGNING
 //     properties = ... needs LWCR update | has LWCR
 //
-// with SIGKILL (Code Signature Invalid) crash reports naming a Launch
-// Constraint Violation. [service status] still reports Enabled throughout,
-// because from BTM's point of view nothing is wrong, so status alone cannot be
-// trusted to mean "will actually launch".
+// with a SIGKILL (Code Signature Invalid) crash report naming a Launch Constraint
+// Violation - the "Squirrel quit unexpectedly" dialog.
 //
-// Comparing the agent program's cdhash against the one recorded at the last
-// successful registration catches exactly this case. An absent record - a fresh
-// install, a wiped preferences file, or any copy that predates this check -
-// counts as stale, which is what heals bundles already broken by an update.
-static BOOL omllLoginAgentNeedsReregistration(void) {
-    NSString *identity = omllCodeIdentityForPath(omllLaunchAgentProgramPath());
-    if (identity == nil) {
-        // Without a cdhash to compare there is nothing to conclude, and
-        // re-registering on every launch would notify the user each time.
-        appLogInfo(@"unable to read the login agent's code identity, leaving "
-                   @"its registration alone");
-        return NO;
-    }
-    NSString *registered = [[NSUserDefaults standardUserDefaults]
-        stringForKey:OMLLLoginAgentIdentityKey];
-    return ![identity isEqualToString:registered];
-}
-
-static void omllRecordLoginAgentIdentity(void) {
-    NSString *identity = omllCodeIdentityForPath(omllLaunchAgentProgramPath());
-    if (identity == nil) {
-        return;
-    }
-    [[NSUserDefaults standardUserDefaults] setObject:identity
-                                             forKey:OMLLLoginAgentIdentityKey];
-}
-
-// omllUnregisterLoginAgentForUpgrade drops the login agent's registration on the
-// way out of an upgrade, so the build that replaced this one registers the agent
-// from scratch instead of re-registering over a job launchd has already pinned to
-// the outgoing build's cdhash. Declared for Go in loginagent_omll_darwin.go.
+// The constraint is stored on the Background Task Management item, not on the
+// launchd job, and unregistering does not drop it. smd's own log, taken while
+// 0.34.0-omll.3 started up after an update, with the item unregistered by the
+// outgoing build one process earlier:
 //
-// Doing the refresh inside one process does not work, which is what
-// registerSelfAsLoginItem below has been attempting: unregisterAndReturnError:
-// returns before launchd has finished tearing the job down, so the register()
-// that follows lands on the job that is still there. launchd flags it
-// "needs LWCR update" and spawns it for RunAtLoad anyway, still checked against
-// the old constraint, and kills the spawn with SIGKILL (Code Signature Invalid).
-// That is the "Squirrel quit unexpectedly" report users see once per update - the
-// crash report names a CODESIGNING / Launch Constraint Violation, and the app log
-// shows the re-registration 28ms ahead of it.
+//     getEffectiveDisposition: disposition=[disabled, allowed, notified], have LWCR=true
+//     BTMManager.registerLaunchItemWithAuditToken
+//     copyJobWithLabel for label com.ohmyllama.app failed with error 113
+//     Successfully bootstrapped
+//     xpcproxy exited due to OS_REASON_CODESIGNING | Launch Constraint Violation
+//     Requesting LWCR update on next spawn
 //
-// Calling it here puts a process boundary in between: this process unregisters and
-// exits, the new build starts, and by the time it reaches registerSelfAsLoginItem
-// launchd has finished dropping the job, so the register() there creates one from
-// scratch and the constraint gets pinned to the binary launchd is actually about to
-// spawn. Which branch of registerSelfAsLoginItem does that register() is not worth
-// relying on: [service status] keeps reporting Enabled for a while after the job is
-// gone (it answers from the Background Task Management database, not from launchd -
-// verified by hand: a job removed with launchctl bootout still read as Enabled).
-// Clearing OMLLLoginAgentIdentityKey above is what makes the incoming build take the
-// refresh branch in that case, and either branch ends up registering against a job
-// that no longer exists, which is the whole point. If the new build never gets that
-// far, the agent is left unregistered, which omllLoginAgentNeedsReregistration
-// already treats as stale.
-void omllUnregisterLoginAgentForUpgrade(void) {
-    SMAppService *service =
-        [SMAppService agentServiceWithPlistName:OML_BUNDLE_ID @".plist"];
-    if (service == nil) {
-        return;
-    }
-    if ([service status] != SMAppServiceStatusEnabled) {
-        // Nothing of ours to drop: either it was never registered, or the user
-        // turned it off in System Settings, which registerSelfAsLoginItem
-        // deliberately leaves alone.
-        return;
-    }
-    NSError *error = nil;
-    if (![service unregisterAndReturnError:&error]) {
-        appLogInfo([NSString stringWithFormat:@"failed to unregister the login "
-            @"agent before handing over to the new build: %@", error]);
-        return;
-    }
-    // The recorded identity describes the registration that just went away.
-    [[NSUserDefaults standardUserDefaults]
-        removeObjectForKey:OMLLLoginAgentIdentityKey];
-    appLogInfo(@"unregistered the login agent so the new build can register it "
-               @"against its own launch constraint");
-}
-
+// "have LWCR=true" while disabled: register() reuses the constraint pinned by
+// whichever build registered first. So neither unregister-then-register in one
+// process nor doing it across a process boundary refreshes anything, and each
+// attempt costs the user a crash dialog, because register() bootstraps the job and
+// RunAtLoad spawns it straight into the check. Doing nothing when the status is
+// already Enabled at least leaves the failure where it belongs - one dead agent
+// after an update, healed by whatever re-pins the item (a fresh login, or toggling
+// the item in System Settings), not a dialog on every launch.
+//
+// The real fix is a Developer ID certificate; _codesign in build_darwin.sh already
+// uses one when APPLE_IDENTITY is set.
 - (void)registerSelfAsLoginItem:(BOOL)firstTimeRun {
     appLogInfo(@"using v13+ SMAppService for login registration");
     // Maps to the file <BundleName>.app/Contents/Library/LaunchAgents/<BundleID>.plist
@@ -1769,22 +1652,18 @@ void omllUnregisterLoginAgentForUpgrade(void) {
         appLogInfo(@"SMAppService failed to find service for " OML_BUNDLE_ID @".plist");
         return;
     }
-    BOOL refreshLaunchConstraint = NO;
     SMAppServiceStatus status = [service status];
     switch (status) {
         case SMAppServiceStatusNotRegistered:
             appLogInfo(@"service not registered, registering now");
             break;
         case SMAppServiceStatusEnabled:
-            if (!omllLoginAgentNeedsReregistration()) {
-                appLogInfo(@"service is already enabled, no need to register again");
-                return;
-            }
-            appLogInfo(@"service is enabled but was registered for a different "
-                       @"build, re-registering to refresh its launch constraint");
-            refreshLaunchConstraint = YES;
-            break;
-        case SMAppServiceStatusRequiresApproval:
+            // Enabled is taken at face value on purpose, even though the agent may
+            // well be one launchd refuses to spawn: see the note above this method
+            // for why the app cannot tell the difference or do anything about it.
+            appLogInfo(@"service is already enabled, no need to register again");
+            return;
+        case SMAppServiceStatusRequiresApproval: 
             // User has disabled our login behavior explicitly so leave it as is
             appLogInfo(@"service is currently disabled and will not start at login");
             return;
@@ -1795,51 +1674,11 @@ void omllUnregisterLoginAgentForUpgrade(void) {
             appLogInfo([NSString stringWithFormat:@"unexpected status: %ld", (long)status]);
             break;
     }
-    if (refreshLaunchConstraint) {
-        // A second register() on an already-registered service is a no-op, so the
-        // stale constraint has to be dropped first. If this fails, register()
-        // below is still worth attempting.
-        NSError *unregisterError = nil;
-        if (![service unregisterAndReturnError:&unregisterError]) {
-            appLogInfo([NSString stringWithFormat:@"failed to unregister the "
-                @"stale login agent: %@", unregisterError]);
-        } else {
-            // Registering again before launchd has finished dropping the job is
-            // what leaves the old constraint in place and gets the RunAtLoad spawn
-            // killed, so wait for the status to change rather than assuming the
-            // unregister took effect immediately. Updates installed by the updater
-            // no longer reach this branch at all - the unregister happens in the
-            // outgoing process, see omllUnregisterLoginAgentForUpgrade - but a
-            // bundle replaced by hand still does. Best effort: registering at the
-            // deadline is no worse than registering straight away, which is what
-            // this did before.
-            //
-            // And "best effort" is the operative part: waiting here is known not to
-            // be enough. Going 0.34.0-omll.1 -> .2 through this branch, the status
-            // dropped below Enabled inside the second (no warning below was logged)
-            // and launchd still killed the spawn 0.5s later with
-            // OS_REASON_CODESIGNING. The status comes from the Background Task
-            // Management database, so it says nothing about whether launchd has let
-            // go of the job yet. Only the process boundary above is reliable; a
-            // bundle replaced by hand therefore still loses its login agent until
-            // the next update re-creates the job.
-            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.0];
-            while ([service status] == SMAppServiceStatusEnabled &&
-                   [deadline timeIntervalSinceNow] > 0) {
-                [NSThread sleepForTimeInterval:0.05];
-            }
-            if ([service status] == SMAppServiceStatusEnabled) {
-                appLogInfo(@"the login agent still reports as registered a second "
-                           @"after unregistering it; registering again anyway");
-            }
-        }
-    }
     NSError *error = nil;
     if (![service registerAndReturnError:&error]) {
         appLogInfo([NSString stringWithFormat:@"Failed to register %@ as a login item: %@", NSBundle.mainBundle.bundleURL, error]);
         return;
     }
-    omllRecordLoginAgentIdentity();
     return;
 }
 

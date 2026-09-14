@@ -1947,10 +1947,6 @@ func RestoreClaudeGatewayForShutdown() C.bool {
 }
 
 func LaunchNewApp() {
-	// Only ever reached with a bundle that has just been replaced, so this is where
-	// the login agent's registration has to go: the constraint launchd pinned
-	// describes the build being left behind.
-	unregisterLoginAgentForUpgrade()
 	appName := C.CString(updater.BundlePath)
 	defer C.free(unsafe.Pointer(appName))
 	C.launchApp(appName)
