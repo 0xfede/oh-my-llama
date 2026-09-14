@@ -39,19 +39,19 @@ static void configureChatGPTRestartAlert(NSAlert *alert,
                                          ChatGPTRestartAction action) {
     switch (action) {
     case ChatGPTRestartActionAddModels:
-        [alert setMessageText:@"Restart ChatGPT to add Ollama models?"];
+        [alert setMessageText:@"Restart ChatGPT to add " OML_NAME @" models?"];
         [alert setInformativeText:
-            @"ChatGPT must restart to add Ollama models. Any running task will stop."];
+            @"ChatGPT must restart to add " OML_NAME @" models. Any running task will stop."];
         break;
     case ChatGPTRestartActionUpdateModels:
-        [alert setMessageText:@"Restart ChatGPT to update Ollama models?"];
+        [alert setMessageText:@"Restart ChatGPT to update " OML_NAME @" models?"];
         [alert setInformativeText:
-            @"ChatGPT must restart to update Ollama models. Any running task will stop."];
+            @"ChatGPT must restart to update " OML_NAME @" models. Any running task will stop."];
         break;
     case ChatGPTRestartActionRemoveModels:
-        [alert setMessageText:@"Restart ChatGPT to remove Ollama models?"];
+        [alert setMessageText:@"Restart ChatGPT to remove " OML_NAME @" models?"];
         [alert setInformativeText:
-            @"ChatGPT must restart to remove Ollama models. Any running task will stop."];
+            @"ChatGPT must restart to remove " OML_NAME @" models. Any running task will stop."];
         break;
     }
     [alert addButtonWithTitle:@"Restart ChatGPT"];
@@ -732,10 +732,10 @@ static NSImage *ollamaApplicationIcon(void) {
         : nil];
     [self.codexAppRow setInactiveStatusText:disconnectPending
         ? @"Try disconnecting again"
-        : (installed ? @"Use Ollama models in ChatGPT" : @"Not installed")];
+        : (installed ? @"Use " OML_NAME @" models in ChatGPT" : @"Not installed")];
     [self.codexAppRow.integrationSwitch setAccessibilityLabel:disconnectPending
         ? @"Retry disconnecting ChatGPT"
-        : @"Use Ollama with ChatGPT"];
+        : @"Use " OML_NAME @" with ChatGPT"];
     [self.codexAppRow setIntegrationActive:connected];
     [self.codexAppRow setIntegrationReady:installed && connected];
     [self applyShowAppsInMenu:shouldShowAppsInMenu()];
@@ -1211,7 +1211,7 @@ didCompleteWithError:(NSError *)error {
         [installAlert setIcon:ollamaApplicationIcon()];
         [installAlert setMessageText:@"Installing ChatGPT"];
         [installAlert setInformativeText:
-            @"Ollama is verifying and copying the ChatGPT app."];
+            OML_NAME @" is verifying and copying the ChatGPT app."];
         NSButton *installingButton =
             [installAlert addButtonWithTitle:@"Installing…"];
         [installingButton setEnabled:NO];
@@ -1378,7 +1378,7 @@ didCompleteWithError:(NSError *)error {
         [installAlert setIcon:ollamaApplicationIcon()];
         [installAlert setMessageText:@"ChatGPT is not installed"];
         [installAlert setInformativeText:
-            @"Download ChatGPT to add Ollama models to the ChatGPT app."];
+            @"Download ChatGPT to add " OML_NAME @" models to the ChatGPT app."];
         [installAlert addButtonWithTitle:@"Download ChatGPT"];
         [installAlert addButtonWithTitle:@"Cancel"];
         if ([installAlert runModal] == NSAlertFirstButtonReturn) {
@@ -1897,9 +1897,10 @@ decidePolicyForNavigationAction:(WKNavigationAction *)action
 
     // The strings matched here are what window.confirm() passes up from the web
     // UI, so they are effectively an identifier shared with Onboarding.tsx and
-    // deliberately keep saying "Ollama" - only the text this alert displays is
-    // rebranded. Rebranding one side alone drops these back to the generic
-    // "Confirm" alert below.
+    // deliberately keep saying "Ollama" - only the text these alerts display is
+    // rebranded, in the branches below and in configureChatGPTRestartAlert.
+    // Rebranding a match literal alone drops it back to the generic "Confirm"
+    // alert below.
     if ([message isEqualToString:@"Restart Claude Desktop to use Ollama? Any running task will stop."]) {
         [alert setMessageText:@"Restart Claude Desktop to use " OML_NAME @"?"];
         [alert setInformativeText:
